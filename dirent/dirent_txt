@@ -242,10 +242,6 @@ The views and conclusions contained in the software and documentation are those
 of the authors and should not be interpreted as representing official policies,
 either expressed or implied, of the FreeBSD Project.
 
-The source and object code (_c and _o files) of this package are (c)
-1993 Richard Kettlewell. You may alter and reproduce them in any way you
-like provided that all alterations are marked as such and provided also
-that the copyright holder is acknowledged.
 
 The header files (_h files) are in the public domain, being adapted from
 those found in Douglas Gwyn's Unix version of this package.
