@@ -1,0 +1,22 @@
+'DIRENT' routines
+=================
+
+Many Unix systems include the headers <dirent.h> and <sys/dirent.h>
+which declare structures and functions for reading directories in a
+fairly portable way. The precise definitions of these types and
+functions are the subject of an IEEE standard.
+
+A public domain implementation of these routines was written by a
+Douglas Gwyn and I have used his work as a model for a set of routines
+providing the same service under QDOS. The header files are essentially
+modified versions of his; the source files, however, are all my own
+work.
+
+Gwyn's routines differ slightly from the Posix standard; I have followed
+his version, since the difference is fairly trivial.
+
+For further information, see dirent_txt and directory_txt which describe
+the data structures and functions.
+
+Richard Kettlewell
+1/7/1993

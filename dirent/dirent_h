@@ -1,0 +1,47 @@
+#ifndef _DIRENT_H
+#define _DIRENT_H
+/*
+ *	<dirent.h> -- definitions for SVR3 directory access routines
+ *
+ *	last edit:	25-Apr-1987	D A Gwyn
+ *
+ *	Prerequisite:	<sys/types.h>
+ *
+ * QDOS version: 1/7/1993 Richard Kettlewell
+ */
+
+#ifndef _SYS_DIRENT_H
+#ifdef _LIBRARY_SOURCE
+#include	"sys/dirent.h"
+#include	<errno.h>
+#include	<qdos.h>
+#else
+#include	<sys/dirent.h>
+#endif
+#endif
+
+#define	DIRBUF 6144						/* nice for many devices */
+
+typedef struct {
+	long _dd_id;						/* file descriptor */
+	int	_dd_loc;						/* offset in block */
+	int	_dd_size;						/* amount of valid data */
+	int _dd_cut;						/* cut prefix length */
+	char *_dd_buf;						/* -> directory block */
+} DIR;									/* stream data from opendir() */
+
+#ifndef _DIRENT_PROTO
+#ifdef __STDC__
+#define _DIRENT_PROTO(X) X
+#else
+#define _DIRENT_PROTO(X) ()
+#endif
+#endif
+
+DIR *opendir _DIRENT_PROTO((char *));
+struct dirent *readdir _DIRENT_PROTO((DIR *));
+off_t telldir _DIRENT_PROTO((DIR *));
+void seekdir _DIRENT_PROTO((DIR *, off_t));
+void rewinddir _DIRENT_PROTO((DIR *));
+int closedir _DIRENT_PROTO((DIR *));
+#endif

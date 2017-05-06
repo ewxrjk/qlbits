@@ -1,0 +1,32 @@
+#include <stdio.h>
+#include <dirent.h>
+#include <stdlib.h>
+
+static void do_test(char *);
+
+main(int argc, char **argv)
+{
+
+	if(argc < 2)
+		do_test(".");
+	else {
+		int i;
+		for(i = 1; i < argc; i++)
+			do_test(argv[i]);
+	}
+	return 0;
+}
+
+static void do_test(char *p)
+{
+	DIR *dp;
+	struct dirent *dip;
+
+	printf("Contents of directory '%s':\n", p);
+	dp = opendir(p);
+	if(!dp)
+		exit(EXIT_FAILURE);
+	while(dip = readdir(dp))
+		printf("%d : %s [%d]\n", dip->d_off, dip->d_name, dip->d_ino);
+	closedir(dp);
+}

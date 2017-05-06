@@ -1,0 +1,12 @@
+/*
+ * rewinddir() function
+ *
+ * 1/7/1993 Richard Kettlewell
+ */
+#define _LIBRARY_SOURCE
+#include "dirent.h"
+
+void rewinddir(DIR *dp)
+{
+	seekdir(dp, 0L);
+}

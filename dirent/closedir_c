@@ -1,0 +1,21 @@
+/*
+ * closedir() function
+ *
+ * 1/7/1993 Richard Kettlewell
+ */
+#define _LIBRARY_SOURCE
+#include "dirent.h"
+#include <stdlib.h>
+
+int closedir(DIR *dp)
+{
+	if(!dp) {
+		errno = EFAULT;
+		return -1;
+	}
+	if(dp->_dd_buf)
+		free(dp->_dd_buf);
+	io_close(dp->_dd_id);
+	free(dp);
+	return 0;
+}

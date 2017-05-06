@@ -1,0 +1,232 @@
+------------------------------------------------------------------------
+
+This file contains the two manual pages dirent.5 and directory.3 from
+Douglas Gwyn's implementation of the 'dirent' routines (see readme_txt)
+and a few notes on the QDOS version.
+
+------------------------------------------------------------------------
+
+DIRENT(5) Standard Extension
+
+NAME
+
+	dirent - file system independent directory entry
+
+
+SYNOPSIS
+
+	#include <sys/types.h>
+	#include <sys/dirent.h>
+
+
+DESCRIPTION
+
+Different file system types may have different directory entries. The
+dirent structure defines a file system independent directory entry,
+which contains information common to directory entries in different file
+system types. A set of these structures is returned by the getdents (2)
+system call.
+
+The dirent structure is defined below.
+
+	struct dirent {
+		long		d_ino;
+		off_t		d_off;
+		unsigned short	d_reclen;
+		char		*d_name;
+	};
+
+The field d_ino is a number which is unique for each file in the file
+system. The field d_off represents an offset of that directory entry in
+the actual file system directory. The field d_name is the beginning of
+the character array giving the name of the directory entry. This name is
+null terminated and may have at most NAME_MAX characters in addition to
+the null terminator. This results in file system independent directory
+entries being variable-length entities. The value of d_reclen is the
+record length of this entry. This length is defined to be the number of
+bytes between the beginning of the current entry and the next one,
+adjusted so that the next entry will start on a long boundary.
+
+
+FILES
+
+	sys/dirent.h
+
+
+SEE ALSO
+
+	getdents(2).
+
+
+WARNING
+
+The field d_off does not have a simple interpretation for some file
+system types and should not be used directly by applications.
+
+------------------------------------------------------------------------
+
+DIRECTORY(3) Standard Extension
+
+NAME
+
+	opendir, readdir, telldir, seekdir, rewinddir, closedir
+	- directory operations
+
+
+SYNOPSIS
+	
+	#include <sys/types.h>
+	#include <dirent.h>
+	
+	DIR *opendir (dirname)
+	char *dirname;
+	
+	struct dirent *readdir (dirp)
+	DIR *dirp;
+	
+	off_t telldir (dirp)
+	DIR *dirp;
+	
+	void seekdir (dirp, loc)
+	DIR *dirp;
+	off_t loc;
+	
+	void rewinddir (dirp)
+	DIR *dirp;
+	
+	int closedir (dirp)
+	DIR *dirp;
+
+
+DESCRIPTION
+
+opendir establishes a connection between the directory named by dirname
+and a unique object of type DIR known as a "directory stream" that it
+creates. opendir returns a pointer to be used to identify the directory
+stream in subsequent operations. A NULL pointer is returned if dirname
+cannot be accessed or is not a directory, or if opendir is unable to
+create the DIR object (perhaps due to insufficient memory).
+
+readdir returns a pointer to an internal structure containing
+information about the next active directory entry. No inactive entries
+are reported. The internal structure may be overwritten by another
+operation on the same directory stream; the amount of storage needed to
+hold a copy of the internal structure is given by the value of a macro,
+DIRENTSIZ(strlen(direntp\->d_name)) , not by "sizeof(struct\ dirent)" as
+one might expect. A NULL pointer is returned upon reaching the end of
+the directory, upon detecting an invalid location in the directory, or
+upon occurrence of an error while reading the directory.
+
+telldir returns the current position associated with the named directory
+stream for later use as an argument to seekdir.
+
+seekdir sets the position of the next readdir operation on the named
+directory stream. The new position reverts to the one associated with
+the directory stream when the telldir operation from which loc was
+obtained was performed.
+
+rewinddir resets the position of the named directory stream to the
+beginning of the directory. All buffered data for the directory stream
+is discarded, thereby guaranteeing that the actual file system directory
+will be referred to for the next readdir on the directory stream.
+
+closedir closes the named directory stream; internal resources used for
+the directory stream are liberated, and subsequent use of the associated
+DIR object is no longer valid. Closedir returns a value of zero if no
+error occurs, -1 otherwise.
+
+There are several possible errors that can occur as a result of these
+operations; the external integer variable errno is set to indicate the
+specific error. (readdir's detection of the normal end of a directory is
+not considered to be an error.)
+
+
+EXAMPLE
+
+Sample code which searches the current working directory for entry name:
+
+	dirp = opendir( "." );
+	while ( (dp = readdir( dirp )) != NULL )
+		if ( strcmp( dp\->d_name, name ) == 0 ) {
+			(void) closedir( dirp );
+			return FOUND;
+		}
+	(void) closedir( dirp );
+	return NOT_FOUND;
+
+
+SEE ALSO
+
+	getdents(2), dirent(5).
+
+
+WARNINGS
+
+Entries for "." and ".." may not be reported for some file system types.
+
+The value returned by telldir need not have any simple interpretation
+and should only be used as an argument to seekdir. Similarly, the loc
+argument to seekdir must be obtained from a previous telldir operation
+on the same directory stream.
+
+telldir and seekdir are unreliable when used in conjunction with file
+systems that perform directory compaction or expansion or when the
+directory stream has been closed and reopened. It is best to avoid using
+telldir and seekdir altogether.
+
+The exact set of errno values and meanings may vary among
+implementations.
+
+Because directory entries can dynamically appear and disappear, and
+because directory contents are buffered by these routines, an
+application may need to continually rescan a directory to maintain an
+accurate picture of its active entries.
+
+------------------------------------------------------------------------
+
+QDOS IMPLEMENTATION
+
+For devices which do not support subdirectories, every file on the disk
+is regarded as being in the root directory.
+
+It is quite reasonable to ask for opendir(".") or opendir("..") and you
+will get the result you want; an underscore is (internally only) added
+to the end of the directory name to make sure that the correct directory
+file is opened.
+
+The d_off field represents the actual offset from the start of the
+directory of the start of the next entry to be read; it will therefore
+always be a multiple of 64. Note that it may actually point at a blank
+entry if there are holes in the directory.
+
+The d_name field holds the filename as a C string; this has the
+directory name part removed. So there is a subdirectory file flp2_dirent
+and you did opendir("flp2_dirent_.") then the file
+"flp2_dirent_opendir_c" will be named "opendir_c" in the return from
+readdir().
+
+The d_ino field is used to hold the file number; this has meaning for
+files on FLP, MDV and RAM devices and quite probably for many others;
+but since I only have these devices I couldn't say (let me know!)
+
+The QDOS version doesn't use getdents(), and I haven't bothered to write
+an emulation of that function.
+
+
+COPYRIGHT
+
+The source and object code (_c and _o files) of this package are (c)
+1993 Richard Kettlewell. You may alter and reproduce them in any way you
+like provided that all alterations are marked as such and provided also
+that the copyright holder is acknowledged.
+
+The header files (_h files) are in the public domain, being adapted from
+those found in Douglas Gwyn's Unix version of this package.
+
+
+AUTHOR
+
+The QDOS version of the 'dirent' routines was written by:
+
+	Richard Kettlewell
+	rjk@greenend.org.uk

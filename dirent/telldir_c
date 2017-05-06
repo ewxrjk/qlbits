@@ -1,0 +1,21 @@
+/*
+ * telldir() function
+ *
+ * 1/7/1993 Richard Kettlewell
+ */
+#define _LIBRARY_SOURCE
+#include "dirent.h"
+
+off_t telldir(DIR *dp)
+{
+	long phys_pos;
+	
+	if(!dp) {
+		errno = EFAULT;
+		return -1;
+	}
+	if(dp->_dd_size)
+		return ((struct dirent *)(dp->_dd_buf + dp->_dd_loc))->d_off;
+	phys_pos = fs_pos(dp->_dd_id, 0L, 1);
+	return _oserr ? -1 : phys_pos;
+}

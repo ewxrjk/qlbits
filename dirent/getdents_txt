@@ -1,0 +1,68 @@
+------------------------------------------------------------------------
+
+The following documents the getdents() call which is *not* part of the
+QDOS DIRENT package --- I include this only for interest.
+
+------------------------------------------------------------------------
+
+GETDENTS(2) Standard Extension
+
+NAME
+
+	getdents - get directory entries in a file system independent
+	           format
+
+SYNOPSIS
+
+	#include <sys/types.h>
+	#include <sys/dirent.h>
+	
+	int getdents (fildes, buf, nbyte)
+	int fildes;
+	char *buf;
+	unsigned nbyte;
+
+DESCRIPTION
+
+Fildes is a file descriptor obtained from an open (2) or dup (2) system
+call.
+
+Getdents attempts to read nbyte bytes from the directory associated with
+fildes and to format them as file system independent entries in the
+buffer pointed to by buf . Since the file system independent directory
+entries are of variable length, in most cases the actual number of bytes
+returned will be less than nbyte .
+
+The file system independent directory entry is specified by the dirent
+structure. For a description of this see dirent (4).
+
+On devices capable of seeking, getdents starts at a position in the file
+given by the file pointer associated with fildes . Upon return from
+getdents , the file pointer has been incremented to point to the next
+directory entry.
+
+This system call was developed in order to implement the readdir routine
+[for a description see directory (3C)] and should not be used for other
+purposes.
+
+SEE ALSO
+
+	directory(3C), dirent(4).
+
+DIAGNOSTICS
+
+Upon successful completion a non-negative integer is returned indicating
+the number of bytes of buf actually filled. (This need not be the number
+actually used in the actual directory file.)
+
+A value of zero indicates the end of the directory has been reached. If
+getdents fails for any other reason, a value of -1 is returned and the
+external integer variable errno is set to indicate the error.
+
+WARNINGS
+
+Entries for "." and ".." may not be reported for some file system types.
+
+The exact set of errno values and meanings may vary among
+implementations.
+

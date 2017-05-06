@@ -1,0 +1,45 @@
+/*
+ * opendir() function
+ *
+ * 1/7/1993 Richard Kettlewell
+ */
+#define _LIBRARY_SOURCE
+#include "dirent.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+/*
+ * Open a directory
+ */
+DIR *opendir(char *name)
+{
+	long id;
+	struct qdirect qd;
+	DIR *dp;
+	char buffer[1+FILENAME_MAX];
+
+	/*
+	 * open directory. qdir_open() does _mkname() for .. and .
+	 * If we say opendir("..") we don't get the desired effect. But
+	 * by bunging a _ on the end of everything, all works out ok.
+	 */
+	strcpy(buffer, name);
+	strcat(buffer, "_");
+	id = open_qdir(buffer);
+	if(id <= 0)
+		return NULL;
+	dp = malloc(sizeof *dp);
+	if(!dp) {
+		io_close(id);
+		return NULL;
+	}
+	fs_headr(id, -1, (char *)&qd, (long)sizeof qd);
+	/* fill in DIR structure */
+	dp->_dd_id = id;					/* Channel id */
+	dp->_dd_loc = 0;					/* Next entry */
+	dp->_dd_size = 0;					/* Bytes of entries remaining */
+	dp->_dd_buf = NULL;					/* Buffer for entries */
+	dp->_dd_cut = qd.d_szname + (qd.d_szname != 0);
+	return dp;
+}

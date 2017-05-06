@@ -1,0 +1,124 @@
+/*
+ * readdir() function
+ *
+ * 1/7/1993 Richard Kettlewell
+ *
+ * There's some slightly subtle stuff going here in terms of buffer sizes.
+ * The DIRBUF macro is defined as 6144 bytes in <dirent.h> and there is
+ * a good reason for this: it is an integer multiple of all the popular
+ * block sizes (a block is 1 or more sectors; files are allocated in blocks
+ * and not sectors.) Known block sizes include:
+ *
+ *		MDV			1024 bytes (2 sectors)
+ *		FLP[DD]		1536 bytes (3 sectors)
+ *		FLP[HD]		1536 bytes (3 sectors)
+ *		FLP[ED]		2048 bytes (1 sector)
+ *
+ * If the code calling readdir() doesn't mess around with seekdir() and so
+ * forth --- they're not very portable anyway --- then we can make sure
+ * that all reads read only whole blocks. Since the first 64 bytes of a
+ * files physical representation are (for our purposes) not used, we
+ * subtract 64 bytes from the length of the very first read.
+ *
+ * Obviously, if you do a bit of reading then rewind the directory, further
+ * reads are going to get partial sectors at each end of the 6K block.
+ * However, by this time it's likely that most of the data is in slave
+ * blocks anyway, so the reads will be faster rather than slower than the
+ * first time round.
+ */
+#define _LIBRARY_SOURCE
+#include "dirent.h"
+#include <string.h>
+#include <stdlib.h>
+
+struct dirent *readdir(DIR *dp)
+{
+	struct dirent *r;
+
+	if(!dp) {
+		errno = EFAULT;
+		return NULL;
+	}
+	if(dp->_dd_size <= 0) {
+		int bytes;
+		struct dirent *dirent_p;
+		struct qdirect *qdirent_p;
+		int stored;
+		long phys_pos;
+
+		/*
+		 * Refill the buffer
+		 */
+		if(!dp->_dd_buf) {
+			if(!(dp->_dd_buf = malloc((size_t)DIRBUF))) {
+				errno = ENOMEM;
+				return NULL;
+			}
+			/* chop off 64 bytes to optimise read for block boundaries */
+			bytes = DIRBUF - 64;
+		} else
+			bytes = DIRBUF;
+		/* find position so it can be recorded appropriately */
+		phys_pos = fs_pos(dp->_dd_id, 0L, 1);
+		bytes = io_fstrg(dp->_dd_id, -1, dp->_dd_buf, bytes);
+		if(bytes == 0) {
+			if(_oserr != -10)
+				errno = EIO;
+			return NULL;
+		}
+		stored = 0;
+		dirent_p = (struct dirent *)dp->_dd_buf;
+		qdirent_p = (struct qdirect *)dp->_dd_buf;
+		while(bytes > 0) {
+			if(qdirent_p->d_length != 0) {
+				struct dirent d;
+				size_t l;
+				char name[40];
+
+				/* non-blank entry */
+				d.d_off = phys_pos;
+				/* level 2 file number. could do d_refdate & 0xffff
+				 * but doing it this way makes explicit the fact
+				 * the we're reading a field which, officially
+				 * speaking, isn't used. (It's NOT a reference date!
+				 * The first 2 bytes --- at 0x38 --- are used as
+				 * version number.)
+				 *
+				 * If the level 2 file number is 0 then we assume that means
+				 * there isn't one --- e.g. microdrives, old FLP driver
+				 * etc. The file number is then derived from the position
+				 * in the directory, and is consistent with file numbers
+				 * for old FLP and for MDV.
+				 *
+				 * QDOS file numbers don't quite correspond to i-node
+				 * numbers but there's nothing better.
+				 */
+				if(!(d.d_ino = *(unsigned short *)(0x3a + (char *)qdirent_p)))
+					d.d_ino = (phys_pos >> 6) + 1;
+				/* find the filename to return */
+				l = qdirent_p->d_szname - dp->_dd_cut;
+				strncpy(name, qdirent_p->d_name + dp->_dd_cut, l);
+				name[l] = 0;
+				/* find total length */
+				d.d_reclen = DIRENTSIZ(l);
+				/* store record and name */
+				*dirent_p = d;
+				strcpy(dirent_p->d_name, name);
+				/* update pointer, counter */
+				dirent_p = (struct dirent *)((char *)dirent_p + d.d_reclen);
+				stored += d.d_reclen;
+			}
+			/* update pointers, counter */
+			qdirent_p++;
+			phys_pos += 64;
+			bytes -= 64;
+		}
+		dp->_dd_loc = 0;
+		if(!(dp->_dd_size = stored))
+			return NULL;
+	}
+	r = (struct dirent *)(dp->_dd_buf + dp->_dd_loc);
+	dp->_dd_loc += r->d_reclen;
+	dp->_dd_size -= r->d_reclen;
+	return r;
+}

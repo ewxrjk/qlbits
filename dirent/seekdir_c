@@ -1,0 +1,41 @@
+/*
+ * seekdir() function
+ *
+ * 1/7/1993 Richard Kettlewell
+ */
+#define _LIBRARY_SOURCE
+#include "dirent.h"
+
+void seekdir(DIR *dp, off_t posn)
+{
+	if(!dp) {
+		errno = EFAULT;
+		return;
+	}
+	if(posn < 0 || (posn & 63)) {
+		/* trap position value: must be a non-negative multiple of 64 */
+		errno = EINVAL;
+		return;
+	}
+	if(dp->_dd_size) {
+		int remain = dp->_dd_loc + dp->_dd_size;
+		int offset = 0;
+		
+		while(remain > 0) {
+			int l;
+			if(((struct dirent *)(dp->_dd_buf + offset))->d_off == posn) {
+				dp->_dd_size = remain;
+				dp->_dd_loc = offset;
+				return;
+			}
+			l = ((struct dirent *)(dp->_dd_buf + offset))->d_reclen;
+			offset += l;
+			remain -= l;
+		}
+	}
+	dp->_dd_loc = 0;
+	dp->_dd_size = 0;
+	fs_pos(dp->_dd_id, (long)posn, 0);
+	if(_oserr)
+		errno = EINVAL;
+}
