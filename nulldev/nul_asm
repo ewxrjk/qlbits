@@ -1,0 +1,167 @@
+********************************************************************************
+* NUL device
+*
+* (c) 1993 Richard Kettlewell.
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions
+* are met:
+*
+* 1. Redistributions of source code must retain the above copyright
+*    notice, this list of conditions and the following disclaimer.
+* 2. Redistributions in binary form must reproduce the above copyright
+*    notice, this list of conditions and the following disclaimer in
+*    the documentation and/or other materials provided with the
+*    distribution.
+*
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+* "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+* LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+* FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+* COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+* INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+* BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+* LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+* LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+* ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+* POSSIBILITY OF SUCH DAMAGE.
+*
+* The views and conclusions contained in the software and
+* documentation are those of the authors and should not be interpreted
+* as representing official policies, either expressed or implied, of
+* the FreeBSD Project.
+*
+*
+* All reads to a channel open on NUL give EOF; all writes succeed,
+* and the data goes nowhere.
+*
+* Note that the information returned from the write traps is in excess
+* of what is required, though the requirements should be tougher.
+*
+mt.alchp equ      $18
+mt.liod  equ      $20
+io.edlin equ      $04
+io.sbyte equ      $05
+io.sstrg equ      $07
+fs.check equ      $40
+fs.flush equ      $41
+fs.heads equ      $46
+fs.load  equ      $48
+fs.save  equ      $49
+mm.alchp equ      $c0
+mm.rechp equ      $c2
+io.name  equ      $0122
+err.ef   equ      -10
+err.bp   equ      -15
+*
+         section  text
+*
+* Set up the linkage. This is kept in the common heap so that the whole
+* driver is ROMable; it has to contain absolute addresses. A side-effect
+* is that the driver is re-entrant.
+*
+* The linkage consists of four long words:
+*        00       link to next driver
+*        04       address of io routine
+*        08       address of open routine
+*        0C       address of close routine
+*
+* The close routine only needs to deallocate the channel (in the case) so
+* we point it directly at mm.rechp, the low level memory release routine.
+* (The difference between mt.alchp and mm.alchp is quite important. You
+* use mt.alchp for everyday memory allocation and mm.alchp from within
+* device drivers and scheduler tasks.)
+*
+* Since QDOS doesn't have any protection against deletion of device
+* drivers, the linkage block must not be removed!
+*
+         moveq    #mt.alchp,d0
+         moveq    #16,d1
+         moveq    #0,d2                      ; Linkage belongs to system
+         trap     #1
+         tst.l    d0
+         bne.s    exit                       ; Trouble
+         lea      io(pc),a1
+         lea      open(pc),a2
+         move.w   mm.rechp,a3                ; No untangling to do
+         movem.l  a1-a3,4(a0)
+         moveq    #mt.liod,d0                ; Link driver
+         trap     #1
+*
+exit     rts
+*
+* Open channel routine
+*
+* We must determine if the device name is NUL (or nul, or Nul, ...)
+* and if so open a channel for it.
+*
+* Although it would probably be quicker to compare the name directly,
+* you can get a good idea of the names of io drivers by trawling through
+* the list and trying to recognise io.name parameter blocks
+* (don't try to do this at home, kids!)
+*
+* (You have to look for both vector calls AND direct calls since some
+* drivers are in the ROM and have privileged information on where the
+* brains behind io.name are located. And you have to look several bytes
+* into the driver since nontrivial drivers need to do a little setting
+* up before going to QDOS.)
+*
+* Perhaps "/dev/null" should be recognised as well to keep Unix folk happy
+*
+open     move.w   io.name,a2
+         jsr      (a2)
+         rts                                 ; Not interested in errors
+         rts
+         bra.s    found                      ; Skip over definition
+         dc.w     3,'NUL'                    ; Device name
+         dc.w     0                          ; No parameters
+*
+found    moveq    #$18,d1                    ; No fancy stuff in channel definition
+         move.w   mm.alchp,a2
+         jmp      (a2)                       ; Allocate channel
+*
+* IO routine
+* We could use IO.SERIO but that would make a much slower driver.
+*
+io       sub.b    #io.edlin,d0
+         blo      eof
+         subq.b   #io.sbyte-io.edlin,d0
+         beq      send
+         subq.b   #io.sstrg-io.sbyte,d0
+         beq      send
+         sub.b    #fs.check-io.sstrg,d0
+         beq      done
+         subq.b   #fs.flush-fs.check,d0
+         beq      done
+         subq.b   #fs.heads-fs.flush,d0
+         beq      heads
+         subq.b   #fs.load-fs.heads,d0
+         beq      eof
+         subq.b   #fs.save-fs.load,d0
+         beq      save
+         moveq    #err.bp,d0                 ; Bad parameter
+         rts
+*
+* fs.heads --- set header. Pretend we set a 14 byte header.
+*
+heads    moveq    #14,d2
+*
+* io.sstrg --- send data. Parameter is 16 bits, which is probably
+* the single worst design fault in QDOS.
+*
+send     and.l    #$0000ffff,d2              ; 16 bit parameter
+*
+* fs.save --- save data. Parameter is 32 bits.
+*
+save     move.l   d2,d1                      ; count of bytes written
+         add.l    d2,a1                      ; update pointer
+*
+done     moveq    #0,d0
+         rts
+*
+eof      moveq    #0,d1                      ; No bytes read
+         moveq    #err.ef,d0                 ; End of file
+         rts
+*
+         end
