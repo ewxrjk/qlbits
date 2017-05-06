@@ -1,0 +1,355 @@
+1000 REMark
+1010 REMark TOS/MSDOS to QDOS copier
+1020 REMark
+1030 REMark     (TOS=Atari ST)
+1040 REMark     (MSDOS=IBM PC, PS/1, PS/2 + compatibles)
+1050 REMark
+1060 REMark      Needs Toolkit 2 (and a disk drive!!!), Minerva dependencies removed
+1070 REMark      May work with single sided disks - intended for 720k disk, though
+1080 REMark      (Should work with single sided disks, even!)
+1090 REMark
+1100 REMark      By Richard Kettlewell
+1110 REMark
+1120 REMark Revision history
+1130 REMark
+1140 REMark     1.0     Works at last!
+1150 REMark     1.1     Bugs removed; prompting routine added.
+1160 REMark     1.2     More flexibility added
+1170 REMark             (resulting in MSDOS compatibility)
+1180 REMark     1.2a    More informative directory list
+1190 REMark     1.2b    More open minded about sectors per track/nbr of sides
+1200 REMark             (resulting in compatibility with 800K disks)
+1210 REMark     1.2c    Modifications to XCOPY
+1220 REMark     1.2d    Modifications throughout file
+1230 REMark             Deletion of obsolete code
+1240 REMark     1.2e    Minerva dependencies removed
+1250 REMark             An assumption replaced with a different one
+1260 REMark
+1270 REMark Limitations
+1280 REMark
+1290 REMark     Fails on 'sick' disks - i.e. ones which have something
+1300 REMark     badly wrong with them. (e.g. formatted as 800K and variously
+1310 REMark     written to as both 800K and 720K at different times!)
+1320 REMark
+1330 REMark     Sometimes a little unfriendly about files which cannot be found
+1340 REMark
+1350 REMark Advantages
+1360 REMark
+1370 REMark     Virus-proof, since never loads boot sector (different OS anyway!)
+1380 REMark
+1390 REMark     Can still see hidden files &c
+1400 REMark
+1410 REMark The important PROCedures are:-
+1420 REMark
+1430 REMark     cat a$              -   TOS/MSDOS dir list
+1440 REMark     xcopy a$,b$         -   Copy TOS/MSDOS file to QDOS file
+1450 REMark     statistics          -   Information on a TOS/MSDOS disk
+1460 REMark     RUN                 -   Prompt based copying
+1470 REMark
+1480 REMark Filenames and path names are similar to TOS/MSDOS conventions;
+1490 REMark \ character is a separator so e.g.
+1500 REMark
+1510 REMark     cat'a:directory'
+1520 REMark     cat'directory\directory'
+1530 REMark
+1540 REMark     xcopy'a:filename','flp2_temp'
+1550 REMark     xcopy'b:directory\filename',''          (for VIEW)
+1560 REMark     xcopy'directory\directory\filename','ram1_output'
+1570 REMark
+1580 :
+1590 version$='1.2e'
+1600 :
+1610 REMark +-----------------------+
+1620 REMark |List a directory sector|
+1630 REMark +-----------------------+
+1640 :
+1650 DEFine PROCedure lfd(a$)
+1660 LOCal f,b$,tl,th,dl,dh,attr%
+1670  FOR f=0 TO 992 STEP 32
+1680   IF CODE(a$(f+1))=0 OR CODE(a$(f+1))=229 THEN NEXT f:EXIT f
+1690   PRINT a$(f+1TO f+8)&'.'&a$(f+9 TO f+11);' ';
+1700   th=CODE(a$(f+24)):tl=CODE(a$(f+23))
+1710   dh=CODE(a$(f+26)):dl=CODE(a$(f+25))
+1720   PRINT_USING '##/##/#### ##:##:## ',dl&&31,8*(dh&&1)+(dl DIV 32),1980+dh DIV 2,th DIV 8,(th&&7)*8+(tl DIV 32),2*(tl&&31)
+1730   PRINT_USING '#### ',256*CODE(a$(f+28))+CODE(a$(f+27))
+1740   PRINT_USING '####### ',CODE(a$(f+29))+256*(CODE(a$(f+30))+256*(CODE(a$(f+31))+256*(CODE(a$(f+32)))))
+1750   attr%=CODE(a$(f+12))
+1760   IF attr%&&1THEN PRINT'RO ';
+1770   IF attr%&&2THEN PRINT'HIDE ';
+1780   IF attr%&&4THEN PRINT'SYS ';
+1790   IF attr%&&8THEN PRINT'VOL ';
+1800   IF attr%&&32THEN PRINT'ARC ';
+1810   IF attr%&&16THEN PRINT'->';
+1820   PRINT
+1830  END FOR f
+1840 END DEFine
+1850 :
+1860 REMark +----------------+
+1870 REMark |Read a FAT entry|
+1880 REMark +----------------+
+1890 :
+1900 DEFine FuNction rdfat(cl)
+1910 LOCal b$(1024),c$(512)
+1920 LOCal clad,clv,cld
+1930  cld=(cl DIV 2)*3
+1940  clad=cld&&511
+1950  IF clad<509
+1960   GET#Chan\2+cld DIV 512,b$
+1970   clv=256*(256*CODE(b$(3+clad))+CODE(b$(2+clad)))+CODE(b$(1+clad))
+1980  ELSE
+1990   GET#Chan\2+cld DIV 512,b$:GET#3\3+cld DIV 512,c$
+2000   b$=b$&c$
+2010   clv=256*(256*CODE(b$(3+clad))+CODE(b$(2+clad)))+CODE(b$(1+clad))
+2020  END IF
+2030  clad=INT(clv/4096)
+2040  IF cl&&1
+2050   RETurn clad
+2060  ELSE
+2070   RETurn clv-4096*clad
+2080  END IF
+2090 END DEFine
+2100 :
+2110 REMark +----------------------------------------------------------------+
+2120 REMark |Convert TOS/MSDOS sector numbering to 1770/1772 sector numbering|
+2130 REMark +----------------------------------------------------------------+
+2140 :
+2150 DEFine FuNction sector(sts)
+2160  RETurn (sts MOD Sectors_Per_Track)+1
+2170 END DEFine
+2180 :
+2190 DEFine FuNction side(sts)
+2200  RETurn (sts DIV Sectors_Per_Track)MOD Sides
+2210 END DEFine
+2220 :
+2230 DEFine FuNction track(sts)
+2240  RETurn sts DIV Sectors_Per_Cylinder
+2250 END DEFine
+2260 :
+2270 REMark +----------------------------------------------+
+2280 REMark |Read cluster                                  |
+2290 REMark |Cluster+65536 implies root directory(0,1,2...)|
+2300 REMark +----------------------------------------------+
+2310 :
+2320 DEFine FuNction rdcl$(cl)
+2330 LOCal a$(512),b$(512),s,p
+2340  IF cl>65535
+2350   p=Start_Of_Root+cl*2-131072
+2360   GET#Chan\sector(p)+256*(side(p)+256*track(p)),a$
+2370   p=p+1
+2380   IF p<Start_Of_Root+Directory_Sectors
+2390    GET#Chan\sector(p)+256*(side(p)+256*track(p)),b$
+2400   ELSE
+2410    b$=FILL$(CHR$(0),512)
+2420   END IF
+2430  ELSE
+2440   s=2*(cl-2)+First_Sector
+2450   GET#Chan\sector(s)+256*(side(s)+256*track(s)),a$
+2460   s=s+1
+2470   GET#Chan\sector(s)+256*(side(s)+256*track(s)),b$
+2480  END IF
+2490  RETurn a$&b$
+2500 END DEFine
+2510 :
+2520 REMark +------------------------------------------+
+2530 REMark |List the directory starting at cluster cl.|
+2540 REMark +------------------------------------------+
+2550 :
+2560 DEFine PROCedure listdir(cl)
+2570 LOCal clu,rp,l
+2580  clu=cl:l=3584
+2590  REPeat rp
+2600   lfd rdcl$(clu)
+2610   IF clu>65535
+2620    clu=clu+1
+2630    l=l-1024:IF l<1 THEN EXIT rp
+2640   ELSE
+2650    clu=rdfat(clu)
+2660    IF clu>4079 THEN EXIT rp
+2670   END IF
+2680  END REPeat rp
+2690 END DEFine
+2700 :
+2710 REMark +---------------------------------------------------------+
+2720 REMark |Returns the directory entry for the given file.          |
+2730 REMark |[ <drive>: ] { <directory>\ } <filename> [ .<extension> ]|
+2740 REMark +---------------------------------------------------------+
+2750 :
+2760 DEFine FuNction find$(g$)
+2770 LOCal f$
+2780  f$=g$
+2790  IF f$(2)=':'
+2800   IF f$(1)=='B' THEN Chan=FOP_IN('flp2_*d2d'):ELSE Chan=FOP_IN('flp1_*d2d')
+2810   f$=f$(3 TO)
+2820  ELSE
+2830   Chan=FOP_IN('flp1_*d2d')
+2840  END IF
+2850  get_bpb#Chan
+2860  IF Chan<0THEN REPORT#0,Chan:RETurn Null32$
+2870  RETurn _find$(65536,f$)
+2880 END DEFine
+2890 :
+2900 REMark +-------------------------------+
+2910 REMark |Find the file f$ in directory d|
+2920 REMark +-------------------------------+
+2930 :
+2940 DEFine FuNction _find$(d,f$)
+2950 LOCal p,clu,n$,c$,rp,f
+2960  Null32$=FILL$(CHR$(0),32)
+2970  p='\'INSTR f$
+2980  IF p
+2990   d$=_find$((d),f$(1 TO p-1))
+3000   IF d$=Null32$ THEN RETurn Null32$
+3010   RETurn _find$(CODE(d$(27))+256*CODE(d$(28)),f$(p+1 TO))
+3020  ELSE
+3030   p='.' INSTR f$
+3040   IF NOT p
+3050    n$=f$&FILL$(' ',11-LEN(f$))
+3060   ELSE
+3070    n$=f$(1 TO p-1)
+3080    IF LEN(n$)<>8 THEN n$=n$&FILL$(' ',8-LEN(n$))
+3090    IF p=LEN(f$) THEN f$=f$&' '
+3100    e$=f$(p+1 TO)
+3110    IF LEN(e$)<>3 THEN e$=e$&FILL$(' ',3-LEN(e$))
+3120    n$=n$&e$
+3130   END IF
+3140   clu=d
+3150   REPeat rp
+3160    c$=rdcl$(clu)
+3170    FOR f=0 TO 31
+3180     IF n$==c$(f*32+1 TO f*32+11) THEN RETurn c$(f*32+1 TO f*32+32)
+3190    END FOR f
+3200    IF clu>65535
+3210     clu=clu+1
+3220     IF clu>65542 THEN EXIT rp
+3230    ELSE
+3240     clu=rdfat(clu)
+3250     IF clu>4079 THEN EXIT rp
+3260    END IF
+3270   END REPeat rp
+3280   PRINT 'File '&f$&' not found.':RETurn Null32$
+3290  END IF
+3300 END DEFine
+3310 :
+3320 REMark +-----------------------------------------+
+3330 REMark |List the catalogue of the given directory|
+3340 REMark +-----------------------------------------+
+3350 :
+3360 DEFine PROCedure cat(a$)
+3370 LOCal b$,Chan
+3380  Null32$=FILL$(CHR$(0),32)
+3390  IF a$=''OR a$=='a:'
+3400   Chan=FOP_IN('flp1_*d2d')
+3410   IF Chan<0THEN REPORT#0,Chan:RETurn
+3420   get_bpb#Chan:listdir 65536:CLOSE#Chan:RETurn
+3430  END IF
+3440  IF a$=='b:'
+3450   Chan=FOP_IN('flp2_*d2d')
+3460   IF Chan<0THEN REPORT#0,Chan:RETurn
+3470   get_bpb#Chan:listdir 65536:CLOSE#Chan:RETurn
+3480  END IF
+3490  b$=find$(a$)
+3500  IF b$<>Null32$
+3510   listdir CODE(b$(27))+256*CODE(b$(28))
+3520  END IF
+3530  CLOSE#Chan
+3540  PRINT
+3550 END DEFine
+3560 :
+3570 REMark +------------------------------------+
+3580 REMark |Copy a TOS/MSDOS file to a QDOS file|
+3590 REMark +------------------------------------+
+3600 :
+3610 DEFine PROCedure xcopy(tos$,qdos$)
+3620 LOCal a$,c$,clu,le,rp,ch
+3630  Null32$=FILL$(CHR$(0),32)
+3640  a$=find$(tos$):IF a$=Null32$ THEN RETurn
+3650  le=CODE(a$(29))+256*(CODE(a$(30))+256*(CODE(a$(31))+256*(CODE(a$(32)))))
+3660  clu=256*CODE(a$(28))+CODE(a$(27))
+3670  IF qdos$=''
+3680   ch=1
+3690  ELSE
+3700   ch=FOP_OVER(qdos$)
+3710   IF ch<0
+3720    CLOSE#Chan:REPORT#0,ch:RETurn
+3730   END IF
+3740  END IF
+3750  REPeat rp
+3760   c$=rdcl$(clu)
+3770   IF le<1024 THEN PRINT#ch;c$(1 TO le);:EXIT rp
+3780   PRINT#ch;c$;
+3790   le=le-1024:IF le<1 THEN EXIT rp
+3800   clu=rdfat(clu):IF clu>4079 THEN PRINT 'Premature end of file.':EXIT rp
+3810  END REPeat rp
+3820  IF ch<>1THEN CLOSE#ch
+3830  CLOSE#Chan
+3840 END DEFine
+3850 :
+3860 REMark +-----------------------+
+3870 REMark |Prompted copier utility|
+3880 REMark +-----------------------+
+3890 :
+3900 MODE 4:CLS:PRINT 'TOS/MSDOS to QDOS copier v'&version$
+3910 PRINT '(c) 1990,1991 RJK'
+3920 PRINT
+3930 tp$=''
+3940 REPeat mlp
+3950  INPUT 'Enter TOS/MSDOS filename, or press ENTER for a directory'\tf$
+3960  IF tf$=''
+3970   PRINT 'Enter path':INPUT tp$
+3980   cat tp$
+3990   NEXT mlp
+4000  END IF
+4010  INPUT 'Enter QDOS filename, or press ENTER for a directory'\qf$
+4020  IF qf$=''
+4030   INPUT 'Enter path':INPUT qp$
+4040   DIR qp$
+4050   NEXT mlp
+4060  END IF
+4070  xcopy tf$,qf$
+4080  PRINT
+4090 END REPeat mlp
+4100 :
+4110 DEFine FuNction speek(a$,n)
+4120  RETurn CODE(a$(n+1))
+4130 END DEFine
+4140 :
+4150 DEFine FuNction speek_w(a$,n)
+4160  RETurn speek(a$,n)+256*speek(a$,n+1)
+4170 END DEFine
+4180 :
+4190 REMark +---------------------------------------------------+
+4200 REMark |Display information on a disks low level definition|
+4210 REMark +---------------------------------------------------+
+4220 :
+4230 DEFine PROCedure statistics
+4240 LOCal a$,Chan
+4250  CLS
+4260  INPUT'Insert disk in flp1_ and press ENTER'\a$
+4270  Chan=FOP_IN('flp1_*d2d')
+4280  GET#Chan\1,a$
+4290  CLOSE#Chan
+4300  PRINT'Bytes/sector:               ';speek_w(a$,11)
+4310  PRINT'Sectors/cluster:            ';speek(a$,13)
+4320  PRINT'Reserved sectors:           ';speek_w(a$,14)
+4330  PRINT'Number of FATs:             ';speek(a$,16)
+4340  PRINT'Number of directory entries ';speek_w(a$,17)
+4350  PRINT'Sectors/FAT:                ';speek_w(a$,22)
+4360  PRINT'Sectors/track:              ';speek_w(a$,24)
+4370  PRINT'Number of sides:            ';speek_w(a$,26)
+4380 END DEFine
+4390 :
+4400 DEFine PROCedure sv
+4410  SAVE_O'flp1_dfs_msdos_read_bas'
+4420  SAVE_O'flp2_dfs_msdos_read_bas'
+4430 END DEFine
+4440 :
+4450 DEFine PROCedure get_bpb(c)
+4460 LOCal a$
+4470  GET#c\1,a$
+4480  Start_Of_Root=speek(a$,16)*speek_w(a$,22)+speek_w(a$,14)
+4490  Directory_Sectors=32*speek_w(a$,17)/speek_w(a$,11)
+4500  First_Sector=Start_Of_Root+Directory_Sectors
+4510  Sectors_Per_Track=speek_w(a$,24)
+4520  Sides=speek_w(a$,26)
+4530  Sectors_Per_Cylinder=Sectors_Per_Track*Sides
+4540 END DEFine

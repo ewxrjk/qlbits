@@ -1,0 +1,186 @@
+1000 REMark
+1010 REMark BASICList3
+1020 REMark
+1030 REMark For listing BBC BASIC V programs
+1040 REMark Probably earlier version as well
+1050 REMark
+1060 REMark Written by a GO TO hater ... won't correctly list programs containing
+1070 REMark such constructs!
+1080 REMark
+1090 REMark Originally by James Dennett
+1100 REMark Ported to Ql by Richard Kettlewell
+1110 REMark
+1120 REMark Original source in dfs_arc_basicV_bbc.
+1130 REMark
+1140 REMark Originally required Minerva (integer FOR and SELect)
+1150 REMark (but such dependencies now removed?)
+1160 REMark
+1170 REMark Needs Toolkit 2
+1180 REMark
+1190 :
+1200 CLS:RESTORE
+1210 REPeat getbasic5
+1220  INPUT 'Enter filename to list:'!file$
+1230  IF FTEST(file$) THEN PRINT 'No can do - ';:REPORT#1,FTEST(file$):ELSE EXIT getbasic5
+1240 END REPeat getbasic5
+1250 :
+1260 REPeat getqdos
+1270  INPUT 'Enter QDOS output device - ENTER for screen:';ot$
+1280  IF ot$='' THEN o%=1:ELSE o%=FOP_OVER(ot$)
+1290  IF o%<0 THEN PRINT 'No can do - ';:REPORT#1,o%:ELSE EXIT getqdos
+1300 END REPeat getqdos
+1310 :
+1320 base=ALCHP(FLEN(\file$))
+1330 LBYTES file$,base:b1=base
+1340 DIM token$(255,12)
+1350 FOR n=127 TO 255:READ token$(n)
+1360 REMark
+1370 REMark Change listo% and tab% as you wish
+1380 REMark Look at rest of program to determine what they do.
+1390 REMark (or look at basicV_bbc as mentioned above)
+1400 REMark
+1410 listo%=255
+1420 tab%=2
+1430 bbclist#o%;10,30000
+1440 IF o%<>1 THEN CLOSE#o%
+1450 RECHP b1
+1460 STOP
+1470 :
+1480 DEFine PROCedure bbclist(o%,start,end_)
+1490 LOCal linenumber,length%,new_,byte,space%,last%,va
+1500  space%=0
+1510  linenumber=number(base)
+1520  REPeat while
+1530   IF linenumber>=start THEN EXIT while
+1540   base=base+PEEK(3+base)
+1550   linenumber=number(base)
+1560  END REPeat while
+1570  REPeat while
+1580   IF space%<0 THEN space%=0
+1590   IF NOT((linenumber<65280) AND linenumber<end_) THEN EXIT while
+1600   IF (listo%&&8)=0 THEN PRINT#o%;space$(linenumber);linenumber;
+1610   IF (listo%&&1) THEN PRINT#o%;" ";
+1620   IF (listo%&&2) THEN PRINT#o%;FILL$(' ',space%);
+1630   length%=PEEK(3+base)
+1640   new_=base+length%
+1650   IF length%>4
+1660    FOR base=base+4 TO new_-1
+1670     last%=(base=new_-1)
+1680     byte=PEEK(base)
+1690     IF byte<32 OR byte>126 THEN
+1700     SELect ON byte=203,204,205,206,237,253:space%=space%-tab%:END SELect
+1710     IF (byte>126 AND byte<198) OR (byte>200 AND byte<256)
+1720      PRINT#o%;cas$(token$(byte));
+1730     ELSE
+1740      SELect ON byte
+1750       =198
+1760        base=base+1
+1770        va=PEEK(base)
+1780        SELect ON va
+1790         =142:PRINT#o%;cas$("sum");
+1800         =143:PRINT#o%;cas$("beat");
+1810        =REMAINDER
+1820         PRINT "{198}{";va%;"}";
+1830        END SELect
+1840       =199
+1850        base=base+1
+1860        va=PEEK(base)
+1870        SELect ON va
+1880         =142:PRINT#o%;cas$("append");
+1890         =143:PRINT#o%;cas$("auto");
+1900         =144:PRINT#o%;cas$("delete");
+1910         =145:PRINT#o%;cas$("edit");
+1920         =146:PRINT#o%;cas$("help");
+1930         =147:PRINT#o%;cas$("list");
+1940         =148:PRINT#o%;cas$("load");
+1950         =149:PRINT#o%;cas$("lvar");
+1960         =150:PRINT#o%;cas$("new");
+1970         =151:PRINT#o%;cas$("old");
+1980         =152:PRINT#o%;cas$("renumber");
+1990         =153:PRINT#o%;cas$("save");
+2000        =REMAINDER
+2010         PRINT#o%;"{199}{";va%;"}";
+2020        END SELect
+2030       =200
+2040        base=base+1
+2050        va=PEEK(base)
+2060        SELect ON va
+2070         =142:PRINT#o%;cas$("case");:space%=space%+tab%
+2080         =143:PRINT#o%;cas$("circle");
+2090         =144:PRINT#o%;cas$("fill");
+2100         =145:PRINT#o%;cas$("origin");
+2110         =146:PRINT#o%;cas$("point");
+2120         =147:PRINT#o%;cas$("rectangle");
+2130         =148:PRINT#o%;cas$("swap");:
+2140         =149:PRINT#o%;cas$("while");:space%=space%+tab%
+2150         =150:PRINT#o%;cas$("wait");
+2160         =151:PRINT#o%;cas$("mouse");
+2170         =152:PRINT#o%;cas$("quit");
+2180         =153:PRINT#o%;cas$("sys");
+2190         =154:PRINT#o%;cas$("install");
+2200         =155:PRINT#o%;cas$("library");
+2210         =157:PRINT#o%;cas$("ellipse");
+2220         =158:PRINT#o%;cas$("beats");
+2230         =159:PRINT#o%;cas$("tempo");
+2240         =160:PRINT#o%;cas$("voices");
+2250         =161:PRINT#o%;cas$("voice");
+2260         =162:PRINT#o%;cas$("stereo");
+2270        =REMAINDER
+2280         PRINT#o%;"{200}{";va;"}";
+2290        END SELect
+2300       =REMAINDER
+2310        PRINT#o%;"{";byte;"}";
+2320       END SELect
+2330       SELect ON byte
+2340        =227,245:space%=space%+tab%
+2350        =140:IF last% THEN space%=space%+tab%
+2360       END SELect
+2370      END IF
+2380     ELSE
+2390      BPUT#o%,byte
+2400     END IF
+2410    END FOR base
+2420   END IF
+2430   base=new_
+2440   linenumber=number(base)
+2450   PRINT
+2460  END REPeat while
+2470 END DEFine
+2480 :
+2490 DEFine FuNction number(address)
+2500  RETurn PEEK(address+1)*256+PEEK(address+2)
+2510 END DEFine
+2520 :
+2530 DEFine FuNction cas$(STRING$)
+2540 LOCal out$,pos,char%
+2550  IF (listo%&&16) THEN RETurn STRING$
+2560  out$=""
+2570  FOR pos=1 TO LEN(STRING$)
+2580   char%=CODE(STRING$(pos))
+2590   IF char%>96 AND char%<121 THEN char%=char%-32
+2600   out$=out$&CHR$(char%)
+2610  END FOR pos
+2620  RETurn out$
+2630 END DEFine
+2640 :
+2650 DEFine FuNction space$(n)
+2660  RETurn FILL$(' ',7-LEN(n))
+2670 END DEFine
+2680 :
+2690 DATA "otherwise","and","div","eor","mod","or","error"
+2700 DATA "line","off","step","spc","tab(","else","then",'void'
+2710 DATA "openin",'ptr','page','time','lomem','himem','abs','acs','adval','asc','asn','atn','bget','cos'
+2720 DATA 'count','deg','erl','err','eval','exp','ext','false','fn','get','inkey','instr(','int','len','ln'
+2730 DATA 'log','not','openup','openout','pi','point(','pos','rad','rnd','sgn','sin','sqr','tan','to','true'
+2740 DATA 'usr','val','vpos','chr$','get$','inkey$','left$','mid$','right$','str$','string$','eof'
+2750 DATA 'void','void','void','when','of','endcase','else','endif','endwhile','ptr','page','time'
+2760 DATA 'lomem','himem','sound','bput','call'
+2770 DATA 'chain','clear','close','clg','cls','data','def','dim','draw','end','endproc','envelope','for'
+2780 DATA 'void','void','gcol','if','input','let','local','mode','move','next','on','vdu','plot','print'
+2790 DATA "proc",'read','rem','repeat','report','restore','return','run','stop','colour','trace'
+2800 DATA 'until','width','oscli'
+2810 :
+2820 DEFine PROCedure sv
+2830  SAVE_O'flp1_dfs_arc_basicV_bas'
+2840  SAVE_O'flp2_dfs_arc_basicV_bas'
+2850 END DEFine

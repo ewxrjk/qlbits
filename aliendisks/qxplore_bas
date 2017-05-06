@@ -1,0 +1,210 @@
+1000 REMark QDOS disk explorer
+1010 REMark
+1020 REMark By Richard Kettlewell
+1030 REMark
+1040 REMark Use MOUNT 1, MOUNT 2 etc to select drive
+1050 REMark VIEWLP and VIEWPL give information
+1060 REMark SETINTERLEAVE number sets interleave - assumess double sided
+1070 REMark VIEWALLOCATIONTABLE gives more information
+1080 REMark
+1090 REMark
+1100 REMark Requires TK2, Minerva
+1110 :
+1120 mounteddrive$=''
+1130 block00$='':block01$='':block02$=''
+1140 combined$=''
+1150 :
+1160 REMark Init. variables for a specified drive
+1170 DEFine PROCedure Mount(drive%)
+1180 LOCal c%
+1190 LOCal a$(512),b$(512),c$(512)
+1200  mounteddrive$='flp'&drive%&'_*d2d'
+1210  c%=FOP_IN(mounteddrive$)
+1220  IF c%<0
+1230   PRINT#0;'Cannot mount drive '&drive%
+1240   mounteddrive$=''
+1250   STOP
+1260  END IF
+1270  REMark
+1280  REMark Read block 0 sector 0
+1290  REMark
+1300  GET#c%\1,block00$
+1310  REMark
+1320  REMark This contains info on where to find block 0 sectors 1 and 2
+1330  REMark
+1340  GET#c%\CODE(block00$(42))+1,block01$
+1350  GET#c%\CODE(block00$(43))+1,block02$
+1360  combined$=block00$&block01$&block02$
+1370  CLOSE#c%
+1380 END DEFine
+1390 :
+1400 REMark Miscellaneous functions
+1410 DEFine FuNction DBPeek(a%)
+1420  RETurn CODE(combined$(a%+1))
+1430 END DEFine
+1440 :
+1450 DEFine FuNction DBPeek_W(a%)
+1460  RETurn DBPeek(a%)*256+DBPeek(a%+1)
+1470 END DEFine
+1480 :
+1490 DEFine FuNction DBPeek_L(a%)
+1500  RETurn DBPeek_W(a%)*65536+DBPeek_W(a%+2)
+1510 END DEFine
+1520 :
+1530 REMark List the logical to physical table
+1540 DEFine PROCedure ViewLP
+1550 LOCal n%
+1560  IF mounteddrive$='' THEN PRINT#0;'No drive mounted.':STOP
+1570  CLS
+1580  FOR n%=0 TO 17
+1590   PRINT n%;TO 10;DBPeek(n%+40) DIV 128;TO 20;DBPeek(n%+40)&&127
+1600  END FOR n%
+1610 END DEFine
+1620 :
+1630 REMark List the physical to logical table
+1640 DEFine PROCedure ViewPL
+1650 LOCal n%
+1660  IF mounteddrive$='' THEN PRINT#0;'No drive mounted.':STOP
+1670  CLS
+1680  FOR n%=0 TO 17
+1690   PRINT n%;TO 10;DBPeek(n%+58)
+1700  END FOR n%
+1710 END DEFine
+1720 :
+1730 DEFine PROCedure SetInterLeave(il%)
+1740 LOCal ltop%(17),ptol%(17)
+1750 LOCal n%, i%, stp%
+1760 LOCal a$
+1770 LOCal l
+1780  IF mounteddrive$='' THEN PRINT#0;'No drive mounted.':STOP
+1790  REMark
+1800  REMark Init. table
+1810  REMark
+1820  FOR n%=0 TO 17:ptol%(n%)=-1
+1830  i%=0
+1840  REMark
+1850  REMark Fill out tables
+1860  REMark
+1870  FOR n%=0 TO 17
+1880   REPeat l:IF ptol%(i%)<>-1 THEN i%=(i%+1)MOD 18:ELSE EXIT l
+1890   ptol%(i%)=n%
+1900   ltop%(n%)=(i% MOD 9)+128*(i% DIV 9)
+1910   i%=(i%+il%)MOD 18
+1920  END FOR n%
+1930  REMark
+1940  REMark Write tables in
+1950  REMark
+1960  FOR n%=0 TO 17:block00$(41+n%)=CHR$(ltop%(n%)):block00$(59+n%)=CHR$(ptol%(n%))
+1970  REMark
+1980  REMark Modify sector offset per track (stepping value) - or not.
+1990  REMark
+2000  stp%=DBPeek_W(38)
+2010  PRINT#0;'Stepping value is currently ';stp%
+2020  INPUT#0;'Enter new value (or press ENTER to keep): ';a$
+2030  IF a$<>'' THEN stp%=a$:block00$(39)=CHR$(stp%DIV 256):block00$(40)=CHR$(stp%&&255)
+2040  REMark
+2050  REMark Delete directory.
+2060  REMark
+2070  block00$(35)=CHR$(0)
+2080  block00$(36)=CHR$(0)
+2090  block00$(37)=CHR$(0)
+2100  block00$(38)=CHR$(64)
+2110  combined$=block00$&block01$&block02$
+2120  WriteBack
+2130 END DEFine
+2140 :
+2150 DEFine FuNction FileNumber%(block%)
+2160 LOCal a%
+2170  a%=96+3*block%
+2180  RETurn INT(DBPeek_W(a%)/16)
+2190 END DEFine
+2200 :
+2210 DEFine FuNction FileBlock%(block%)
+2220 LOCal a%, b
+2230  a%=96+3*block%
+2240  b=DBPeek_W(a%+1)
+2250  IF b>=32768 THEN b=b-32768
+2260  RETurn b&&4095
+2270 END DEFine
+2280 :
+2290 DEFine PROCedure ViewAllocationTable
+2300 LOCal c%, ch%
+2310 LOCal topblock%, blocks%
+2320 LOCal nf$, nf%, a%
+2330 LOCal Loop
+2340  IF mounteddrive$='' THEN PRINT#0;'No drive mounted.':STOP
+2350  c%=FOPEN('scr_484x202a14x0')
+2360  IF c%<0 THEN PRINT#0;'Cannot open screen channel.':STOP
+2370  BORDER#c%,1,255
+2380  PAPER#c%,0
+2390  INK#c%,7
+2400  CSIZE#c%,1,0
+2410  CLS#c%
+2420  topblock%=0
+2430  blocks%=DBPeek_W(24)/DBPeek_W(32)
+2440  PRINT#c%;'A.Block';TO 10;'File';TO 20;'F.Block'
+2450  FOR n%=0 TO 18:PRINT#c%;n%;TO 10;HEX$(FileNumber%(n%),12);TO 20;HEX$(FileBlock%(n%),12)
+2460  REPeat Loop
+2470   BGET#0, ch%
+2480   SELect ON ch%
+2490    =27
+2500     EXIT Loop
+2510    =208
+2520     IF topblock%
+2530      AT#c%,0,0
+2540      SCROLL#c%,10,2
+2550      topblock%=topblock%-1
+2560      AT#c%,1,0
+2570      PRINT#c%;topblock%;TO 10;HEX$(FileNumber%(topblock%),12);TO 20;HEX$(FileBlock%(topblock%),12)
+2580     END IF
+2590    =216
+2600     IF topblock%<blocks%-19
+2610      AT#c%,0,0
+2620      SCROLL#c%,-10,2
+2630      topblock%=topblock%+1
+2640      AT#c%,19,0
+2650      PRINT#c%;topblock%+18;TO 10;HEX$(FileNumber%(topblock%+18),12);TO 20;HEX$(FileBlock%(topblock%+18),12)
+2660     END IF
+2670    =10,32
+2680     PRINT#0;'Current file number is ';HEX$(FileNumber%(topblock%+18),12)
+2690     INPUT#0;'Enter new file number ($ for hex, ENTER for no change.) ';nf$
+2700     IF nf$<>''
+2710      IF nf$(1)='$'
+2720       nf%=HEX(nf$(2 TO))
+2730      ELSE
+2740       nf%=nf$
+2750      END IF
+2760      IF nf%>4095
+2770       PRINT#0;'Cannot write a file number > 4095.'
+2780      ELSE
+2790       a%=96+3*topblock%
+2800       combined$(a%+1)=CHR$(nf% DIV 16)
+2810       combined$(a%+2)=CHR$(16*(nf%&&15)+(CODE(combined$(a%+2))&&15))
+2820       AT#c%,1,0:CLS 3
+2830       PRINT#c%;topblock%;TO 10;HEX$(FileNumber%(topblock%),12);TO 20;HEX$(FileBlock%(topblock%),12)
+2840      END IF
+2850     END IF
+2860   END SELect
+2870  END REPeat Loop
+2880  CLOSE#c%
+2890 END DEFine
+2900 :
+2910 REMark Write changes back to disk
+2920 DEFine PROCedure WriteBack
+2930 LOCal c%
+2940  IF mounteddrive$='' THEN PRINT#0;'No drive mounted.':STOP
+2950  c%=FOPEN(mounteddrive$)
+2960  IF c%<0
+2970   PRINT#0;'Cannot open channel to disk.'
+2980   STOP
+2990  END IF
+3000  PUT#c%\1,block00$
+3010  PUT#c%\CODE(block00$(42))+1,block01$
+3020  PUT#c%\CODE(block00$(43))+1,block02$
+3030  CLOSE#c%
+3040 END DEFine
+3050 :
+3060 DEFine PROCedure sv
+3070  SAVE_O'flp1_dfs_qdos_xplore_bas'
+3080  SAVE_O'flp2_dfs_qdos_xplore_bas'
+3090 END DEFine

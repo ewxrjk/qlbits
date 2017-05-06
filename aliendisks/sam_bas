@@ -1,0 +1,213 @@
+1000 REMark
+1010 REMark SAMDOS disk reader
+1020 REMark
+1030 REMark By Richard Kettlewell
+1040 REMark
+1050 REMark Works with MasterDOS, but regards all files as being in
+1060 REMark root directory and lists subdirectories as just another file.
+1070 REMark Don't try to copy them!
+1080 REMark I couldn't say what happens if you have a disk with an unusual
+1090 REMark directory size - this program is, to be perfectly honest, only part
+1100 REMark finished!
+1110 REMark
+1120 REMark Needs TK2, most Minerva dependencies removed.
+1130 REMark
+1140 REMark RUN for file copying; there are some post-processors...
+1150 REMark
+1160 REMark STQ converts a SAM font to a Ql font
+1170 REMark VS converts SAM screens to Ql screens (sort of)
+1180 REMark
+1190 REMark VF will only work with Minerva
+1200 REMark
+1210 :
+1220 OPEN_IN#3,'flp1_*d2d'
+1230 CLS
+1240 REPeat lp
+1250  INPUT "Enter filename to copy across (ENTER for a list): ";f$
+1260  IF f$=''
+1270   INPUT 'Enter template: ';t$
+1280   CLS:show_files#1,t$
+1290   NEXT lp
+1300  END IF
+1310  REPeat vl:IF LEN(f$)<10 THEN f$=f$&' ':ELSE EXIT vl
+1320  f%=-1
+1330  FOR n=0 TO 79
+1340   sec%=1+(n DIV 2)MOD 10:tr%=n DIV 20:GET#3\65536*tr%+sec%,a$
+1350   IF n&&1 THEN a$=a$(257 TO)
+1360   IF a$(2 TO 11)==f$ THEN f%=n:type=CODE(a$(1)):EXIT n
+1370  END FOR n
+1380  IF f%>-1 THEN EXIT lp
+1390  CLS
+1400 END REPeat lp
+1410 :
+1420 sec%=1+(f% DIV 2)MOD 10
+1430 tr%=f% DIV 20
+1440 of=65536*tr%+sec%
+1450 :
+1460 GET#3\of,a$
+1470 IF f%&&1
+1480  a$=a$(257 TO)
+1490 ELSE
+1500  a$=a$(TO 256)
+1510 END IF
+1520 CLS
+1530 s%=CODE(a$(13))
+1540 PRINT 'Takes'!s%!'sectors.'
+1550 sl=(s%-1)*512
+1560 t%=CODE(a$(14)):s%=CODE(a$(15))
+1570 si%=(t%&&128)*2
+1580 t%=t%&&127
+1590 GET#3\t%*65536+s%+si%,a$
+1600 le=sl+CODE(a$(2))+256*(CODE(a$(3))&&1)
+1610 PRINT 'Length given is'!le
+1620 INPUT 'Enter QDOS file, or ENTER to cancel: ';q$
+1630 IF q$='' THEN STOP
+1640 OPEN_NEW#4,q$
+1650 PRINT t%+si% DIV 2,s%
+1660 c_bytes a$(10 TO 510)
+1670 IF le
+1680  REPeat l
+1690   s%=CODE(a$(512)):t%=CODE(a$(511))
+1700   IF NOT (s% OR t%) THEN PRINT 0,0:PRINT 'File type '&type$(type)&' lies about length.':EXIT l
+1710   PRINT t%,
+1720   si%=(t%&&128)*2
+1730   t%=t%&&127
+1740   PRINT s%
+1750   GET#3\t%*65536+s%+si%,a$
+1760   c_bytes a$(TO 510)
+1770   IF NOT le THEN EXIT l
+1780  END REPeat l
+1790 END IF
+1800 CLOSE#3,#4
+1810 STOP
+1820 :
+1830 DEFine PROCedure c_bytes(a$)
+1840 LOCal v
+1850  IF LEN(a$)>le
+1860   v=le:le=0
+1870   a$=a$(TO v)
+1880  ELSE
+1890   v=LEN(a$):le=le-v
+1900  END IF
+1910  PRINT#4;a$;
+1920 END DEFine
+1930 :
+1940 DEFine FuNction type$(t)
+1950  SELect ON t
+1960   =0:RETurn 'Erased'
+1970   =1:RETurn 'ZX BASIC'
+1980   =2:RETurn 'ZX #()'
+1990   =3:RETurn 'ZX $()'
+2000   =4:RETurn 'ZX BIN'
+2010   =5:RETurn 'SNAP 48K'
+2020   =6:RETurn 'MD FILE'
+2030   =7:RETurn 'ZX PIC'
+2040   =8:RETurn 'SPECIAL'
+2050   =9:RETurn 'SNAP 128K'
+2060   =10:RETurn 'OPENTYPE'
+2070   =11:RETurn 'N/A EXECUTE'
+2080   =16:RETurn 'MGT BASIC'
+2090   =17:RETurn 'MGT #()'
+2100   =18:RETurn 'MGT $()'
+2110   =19:RETurn 'MGT BIN'
+2120   =20:RETurn 'MGT PIC'
+2130   =21:RETurn 'DIRECTORY'
+2140   =REMAINDER :RETurn 'TYPE '&t
+2150  END SELect
+2160 END DEFine
+2170 :
+2180 DEFine PROCedure show_files(c%,t$)
+2190 LOCal n,se%,tr%,of,a$,n$,l
+2200  CLS
+2210  IF t$='' THEN t$='*'
+2220  FOR n=0 TO 79
+2230   sec%=1+(n DIV 2)MOD 10
+2240   tr%=n DIV 20
+2250   of=65536*tr%+sec%
+2260   GET#3\of,a$
+2270   IF a$=FILL$(CHR$(0),512)THEN EXIT n
+2280   IF n&&1
+2290    a$=a$(257 TO)
+2300   ELSE
+2310    a$=a$(TO 256)
+2320   END IF
+2330   IF a$(1)<>CHR$(0)
+2340    n$=a$(2 TO 11)
+2350    REPeat l:IF n$(LEN(n$))=' ' THEN n$=n$(TO LEN(n$)-1):ELSE EXIT l
+2360    IF t$(1)='*'
+2370     IF t$<>'*'
+2380      IF NOT t$(2 TO)==n$(LEN(n$)-LEN(t$)+2 TO) THEN NEXT n:EXIT n
+2390     END IF
+2400    ELSE
+2410     IF t$(LEN(t$))='*'
+2420      IF LEN(n$)<=LEN(t$) THEN NEXT n:EXIT n
+2430      IF NOT n$(TO LEN(t$)-1)==t$(TO LEN(t$)-1) THEN NEXT n:EXIT n
+2440     END IF
+2450    END IF
+2460    PRINT#c%;n;TO 5;n$;TO 16;CODE(a$(13));TO 20;type$(CODE(a$(1)))
+2470   END IF
+2480   IF INKEY$<>'' THEN EXIT n
+2490  END FOR n
+2500 END DEFine
+2510 :
+2520 DEFine PROCedure stq
+2530 LOCal a$,b$,n,d$
+2540  d$=DATAD$
+2550  CLS:DATA_USE ram1_:DIR _fnt:WDIR _sch
+2560  INPUT 'Enter SAM font (_sch): ';a$:OPEN_IN#3,a$
+2570  INPUT 'Enter QDOS font (_fnt): ';b$:OPEN_NEW#4,b$
+2580  BPUT#4,32,95
+2590  FOR n=1 TO 96
+2600   BGET#3,a%,b%,c%,d%,e%,f%,g%,h%
+2610   BPUT#4,0,a%,b%,c%,d%,e%,f%,g%,h%
+2620  END FOR n
+2630  CLOSE#3,#4
+2640  DATA_USE d$
+2650 END DEFine
+2660 :
+2670 DEFine PROCedure vf
+2680 LOCal a$,a,d$
+2690  d$=DATAD$:DATA_USE ram1_
+2700  CLS:DIR _fnt
+2710  INPUT 'Enter QDOS font to view: ';q$
+2720  a=ALCHP(FLEN(\q$))
+2730  LBYTES q$,a
+2740  CHAR_USE a,0
+2750  CSIZE 1,0
+2760  FOR a$=' ' TO '':PRINT !a$!
+2770  CSIZE 0,0
+2780  PRINT
+2790  CHAR_USE 0,0
+2800  RECHP a
+2810  DATA_USE d$
+2820 END DEFine
+2830 :
+2840 DEFine PROCedure vs
+2850 LOCal q$,qs$,qf$
+2860 LOCal c%,d%
+2870 LOCal n%,a%
+2880 LOCal x,y
+2890  MODE 4
+2900  INPUT 'Enter QDOS filename of SAM screen to view:'!q$
+2910  INPUT 'Save QDOS screen afterwards?'!qs$
+2920  IF qs$=='y'
+2930   INPUT 'Enter QDOS filename to save:'!qf$
+2940  END IF
+2950  c%=FOP_IN(q$)
+2960  IF c%<0 THEN REPORT#0,c%:RETurn
+2970  d%=FOPEN('scr_512x256a0x0'):MODE 8:CLS#d%
+2980  FOR y=0 TO 191
+2990   FOR x=0 TO 508 STEP 4
+3000    BGET#c%,a%
+3010    BLOCK#d%,2,1,x,y,(a% DIV 32)
+3020    BLOCK#d%,2,1,x+2,y,(a%&&15)DIV 2
+3030   END FOR x
+3040  END FOR y
+3050  CLOSE#c%,#d%
+3060  IF qs$=='y' THEN SBYTES_O qf$,131072,32768
+3070 END DEFine
+3080 :
+3090 DEFine PROCedure sv
+3100  SAVE_O'flp1_dfs_sam_read_bas'
+3110  SAVE_O'flp2_dfs_sam_read_bas'
+3120 END DEFine

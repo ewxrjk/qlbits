@@ -1,0 +1,350 @@
+1000 REMark
+1010 REMark Read RISCOS E format disks
+1020 REMark
+1030 REMark By Richard Kettlewell
+1040 REMark
+1050 REMark Based on a pair of articles in RISC User
+1060 REMark lent to me by Martin Dorey
+1070 REMark
+1080 REMark Version 1.0         Can't cope with files >=32k
+1090 REMark         1.1         Can cope with files >=32k
+1100 REMark         1.1a        Minerva dependencies removed
+1110 REMark         1.1b        Extra filetypes added
+1120 REMark
+1130 REMark To come:-
+1140 REMark
+1150 REMark     Modifications to directory name and title reads
+1160 REMark     (RISCOS appears inconsistent between root and branches!)
+1170 REMark
+1180 REMark Needs TK2 and a disk drive!
+1190 REMark
+1200 REMark Has not yet been tested on a fragmented disk - but should work.
+1210 REMark Use dfs_arc_basicV_bas to convert arc basic source to ascii files
+1220 REMark
+1230 REMark Can't handle directories>2048 bytes - are there such things?
+1240 REMark (2048 byte directory allows 77 files)
+1250 REMark
+1260 REMark Not dazzlingly fast. Surprise.
+1270 REMark
+1280 REMark Usage:-
+1290 REMark
+1300 REMark     RUN to initialise variables
+1310 REMark     MOUNT 1 or MOUNT 2 to select drive (or MOUNT 3 etc)
+1320 REMark     XCAT 'path' to list directory
+1330 REMark     XCOPY 'path.filename','qdosfilename' to copy a file
+1340 REMark     XCOPY 'path.filename','' to view a file
+1350 REMark
+1360 REMark     path is
+1370 REMark
+1380 REMark             $               root directory
+1390 REMark             $.dir           a subdirectory
+1400 REMark             $.dir.dir       guess!
+1410 REMark             etc
+1420 REMark
+1430 REMark     (**always** begins $)
+1440 REMark
+1450 :
+1460 DEFine PROCedure sv
+1470  CLOSE
+1480  SAVE_O'flp1_dfs_arc_riscos_read_bas'
+1490  SAVE_O'flp2_dfs_arc_riscos_read_bas'
+1500 END DEFine
+1510 :
+1520 CLOSE:CLCHP
+1530 Fchan%=-6
+1540 Sector0$=''
+1550 DriveNo=0
+1560 :
+1570 DEFine PROCedure mount(d)
+1580 LOCal n
+1590  IF Fchan%>=0THEN CLOSE#Fchan%
+1600  Fchan%=FOP_IN('flp'&d&'_*d3d')
+1610  IF Fchan%<0
+1620   REPORT#0,Fchan%
+1630   RETurn
+1640  END IF
+1650  DriveNo=d
+1660  GET#Fchan%\0,Sector0$
+1670  DiskRecord$=Sector0$(5TO 64)
+1680  L2SectorSize=CODE(DiskRecord$(1))
+1690  SectorsPerTrack=CODE(DiskRecord$(2))
+1700  Sides=CODE(DiskRecord$(3))
+1710  Density=CODE(DiskRecord$(4))
+1720  IDLength=CODE(DiskRecord$(5))
+1730  L2BytesPerMapBit=CODE(DiskRecord$(6))
+1740  TrackSectorSkew=CODE(DiskRecord$(7))-1
+1750  BootOption=CODE(DiskRecord$(8))
+1760  Zones=CODE(DiskRecord$(10))
+1770  RootDirectory=_peekl(DiskRecord$,12)
+1780  DiskName$=MakeQString$(DiskRecord$(23TO 32),0)
+1790  IF Zones<>1OR L2SectorSize<>10OR Density<>2OR IDLength<>15
+1800   PRINT#0,"Can't read this disk...":CLOSE#Fchan%:RETurn
+1810  END IF
+1820  Map$=Sector0$(65TO)
+1830  DIM Map%(LEN(Map$)-1)
+1840  FOR n=1TO LEN(Map$):Map%(n-1)=CODE(Map$(n))
+1850 END DEFine
+1860 :
+1870 DEFine PROCedure dismount
+1880  CLOSE#Fchan%
+1890  DriveNo=0
+1900 END DEFine
+1910 :
+1920 DEFine FuNction _peek(a$,o)
+1930  RETurn CODE(a$(o+1))
+1940 END DEFine
+1950 :
+1960 DEFine FuNction _peekw(a$,o)
+1970  RETurn _peek(a$,o)+256*_peek(a$,o+1)
+1980 END DEFine
+1990 :
+2000 DEFine FuNction _peekl(a$,o)
+2010  RETurn _peekw(a$,o)+65536*_peekw(a$,o+2)
+2020 END DEFine
+2030 :
+2040 DEFine FuNction _peek24(a$,o)
+2050  RETurn _peek(a$,o)+256*_peek(a$,o+1)
+2060 END DEFine
+2070 :
+2080 REMark Find the offset into the map for file number as given, with the
+2090 REMark last invalid offset (i.e. where the previous entry was found) given
+2100 REMark or -1 for no entries yet found.
+2110 :
+2120 DEFine FuNction FindOffset(filno,lastblk)
+2130 LOCal n,p%,nf,l
+2140  IF lastblk>-1
+2150   IF Map%(lastblk)+256*(Map%(lastblk+1)&&127)<>filno
+2160    PRINT#0;'Illegal call to FindOffset - lastblk has invalid value'
+2170    PRINT#0;'('&lastblk&')'
+2180    RETurn -1
+2190   END IF
+2200   FOR n=lastblk+1TO DIMN(Map%)
+2210    IF Map%(n)&&128THEN EXIT n
+2220   END FOR n
+2230  ELSE
+2240   n=-1
+2250  END IF
+2260  p%=n+1
+2270  REPeat l
+2280   IF p%+1>DIMN(Map%)THEN PRINT#0;"Can't find another block":RETurn -1
+2290   nf=Map%(p%)+256*(Map%(p%+1)&&127)
+2300   IF nf=filno THEN EXIT l
+2310   FOR n=p%+1TO DIMN(Map%)
+2320    IF Map%(n)&&128THEN EXIT n
+2330   END FOR n
+2340   p%=n+1
+2350  END REPeat l
+2360  RETurn p%
+2370 END DEFine
+2380 :
+2390 REMark Read a sector based on map position.
+2400 REMark I hope I have understood the skewing value!
+2410 REMark (Acorn apparently don't.)
+2420 :
+2430 DEFine FuNction Read1Sector$(MapPosition)
+2440 LOCal Track%,Side%,Sector%
+2450 LOCal a$
+2460  Track%=MapPosition DIV (Sides*SectorsPerTrack)
+2470  Side%=(MapPosition MOD(Sides*SectorsPerTrack))DIV SectorsPerTrack
+2480  Sector%=MapPosition MOD SectorsPerTrack
+2490  Sector%=(Sector%+Track%*TrackSectorSkew)MOD SectorsPerTrack
+2500  GET#Fchan%\Sector%+256*(Side%+256*Track%),a$
+2510  RETurn a$
+2520 END DEFine
+2530 :
+2540 DEFine FuNction ReadFile$(nbr,lngth,c%)
+2550 LOCal p%,a$,bytes,nb%,b$
+2560 LOCal fil%,of%
+2570  p%=-1:nb%=1
+2580  fil%=INT(nbr/256)
+2590  of%=nbr-256*fil%
+2600  bytes=lngth
+2610  b$=''
+2620  REPeat l
+2630   IF bytes<=0 THEN EXIT l
+2640   IF nb%
+2650    p%=FindOffset(fil%,p%)
+2660    IF p%=-1THEN RETurn ''
+2670    IF of%THEN p%=p%+of%-1
+2680    nb%=0
+2690   ELSE
+2700    p%=p%+1
+2710   END IF
+2720   IF Map%(p%)&&128THEN nb%=1
+2730   a$=Read1Sector$(p%)
+2740   IF bytes<LEN(a$)
+2750    a$=a$(1TO bytes)
+2760   END IF
+2770   IF c%<>-1
+2780    PRINT#c%;a$;
+2790   ELSE
+2800    b$=b$&a$
+2810   END IF
+2820   bytes=bytes-LEN(a$)
+2830  END REPeat l
+2840  RETurn b$
+2850 END DEFine
+2860 :
+2870 DEFine FuNction MakeQString$(a$,c%)
+2880 LOCal a%
+2890  a%=CHR$(c%)INSTR a$
+2900  IF a%THEN RETurn a$(1TO a%-1)
+2910  RETurn a$
+2920 END DEFine
+2930 :
+2940 DEFine PROCedure LDir(Dir$)
+2950 LOCal p%,d$,l,a%,ft,ty$
+2960  CLS
+2970  IF Dir$(2TO 5)<>'Nick'
+2980   PRINT#0;'Not a directory!'
+2990   PRINT Dir$
+3000   RETurn
+3010  END IF
+3020  PRINT'Disk name:       "';DiskName$;'"'
+3030  PRINT'Directory title: "';Dir$(2014TO 2032);'"'
+3040  PRINT'Directory name:  "';Dir$(2033TO 2042);'"'
+3050  PRINT
+3060  p%=6
+3070  REPeat l
+3080   d$=Dir$(p%TO p%+25):p%=p%+26
+3090   IF d$(1)=CHR$(0)THEN EXIT l
+3100   PRINT MakeQString$(d$(1TO 10),13);TO 16;
+3110   ft=(CODE(d$(12))+256*(CODE(d$(13))&&15))
+3120   SELect ON ft
+3130    =1:ty$='STracker'
+3140    =2:ty$='STracker'
+3150    =4:ty$='AIM'
+3160    =257:ty$='Phonedata'
+3170    =273:ty$='PCFormat'
+3180    =1092:ty$='STScript'
+3190    =1359:ty$='Delta'
+3200    =1680:ty$='Clear'
+3210    =1681:ty$='Degas'
+3220    =1692:ty$='Img'
+3230    =1693:ty$='AmigaIFF'
+3240    =1694:ty$='MacPaint'
+3250    =1695:ty$='GIF'
+3260    =1696:ty$='SUN'
+3270    =1697:ty$='PCX'
+3280    =1698:ty$='QRT'
+3290    =1699:ty$='MTV'
+3300    =1670:ty$='CadSoft'
+3310    =1671:ty$='Irlam'
+3320    =2801:ty$='Music'
+3330    =2808:ty$='1WPDoc'
+3340    =2809:ty$='DtpDoc'
+3350    =2810:ty$='DtpStyle'
+3360    =2815:ty$='DrawFile'
+3370    =3004:ty$='BBC ROM'
+3380    =3253:ty$='STSample'
+3390    =3254:ty$='STModule'
+3400    =3339:ty$='1WPCfg'
+3410    =3340:ty$='1WPDict'
+3420    =3353:ty$='Menu'
+3430    =3416:ty$='RendPic'
+3440    =3548:ty$='Archive'
+3450    =3554:ty$='ProArt'
+3460    =3578:ty$='Picture'
+3470    =4075:ty$='Obey'
+3480    =4076:ty$='Template'
+3490    =4077:ty$='Palette'
+3500    =4079:ty$='Diary'
+3510    =4080:ty$='TIFF'
+3520    =4085:ty$='PoScript'
+3530    =4086:ty$='Font'
+3540    =4087:ty$='BBC Font'
+3550    =4088:ty$='Absolute'
+3560    =4089:ty$='Sprite'
+3570    =4090:ty$='Module'
+3580    =4091:ty$='BASIC'
+3590    =4092:ty$='Utility'
+3600    =4093:ty$='Data'
+3610    =4094:ty$='Command'
+3620    =4095:ty$='Text'
+3630    =REMAINDER :ty$=HEX$(ft,12)
+3640   END SELect
+3650   PRINT ty$;FILL$(' ',18-LEN(ty$));
+3660   PRINT HEX$(_peekl(d$,18),32);' ';HEX$(_peek24(d$,22),24);' ';
+3670   a%=CODE(d$(26))
+3680   IF a%&&1THEN PRINT 'R';:ELSE PRINT ' ';
+3690   IF a%&&2THEN PRINT 'W';:ELSE PRINT ' ';
+3700   IF a%&&4THEN PRINT 'L';:ELSE PRINT ' ';
+3710   IF a%&&8THEN PRINT 'D';:ELSE PRINT ' ';
+3720   PRINT
+3730  END REPeat l
+3740  PRINT
+3750 END DEFine
+3760 :
+3770 REMark Find a named file in a directory and return its entry
+3780 REMark Most of contents extracted from previous procedure!
+3790 :
+3800 DEFine FuNction FindFile$(Dir$,Name$)
+3810 LOCal p%,d$,l,b$
+3820  IF Dir$(2 TO 5)<>'Nick'
+3830   PRINT#0,'Not a directory!'
+3840   CLS:PRINT Dir$
+3850   RETurn ''
+3860  END IF
+3870  p%=6
+3880  REPeat l
+3890   d$=Dir$(p%TO p%+25):p%=p%+26
+3900   IF d$(1)=CHR$(0)THEN EXIT l
+3910   b$=MakeQString$(d$(1TO 10),13)
+3920   IF Name$==b$THEN RETurn d$
+3930  END REPeat l
+3940  RETurn ''
+3950 END DEFine
+3960 :
+3970 REMark Get a named files contents into a string or copy to a channel
+3980 :
+3990 DEFine FuNction GetFile$(Dir$,Name$,c%)
+4000 LOCal d$,f_len,f_nbr
+4010  d$=FindFile$(Dir$,Name$)
+4020  IF d$=''THEN RETurn ''
+4030  f_nbr=_peek24(d$,22)
+4040  f_len=_peekl(d$,18)
+4050  RETurn ReadFile$(f_nbr,f_len,c%)
+4060 END DEFine
+4070 :
+4080 REMark Return, as a string (c%<0) or copy to a channel c%, the file named
+4090 REMark the search string should look like this:-
+4100 REMark
+4110 REMark     $               for the root directory
+4120 REMark     $.name          for a file in the root directory
+4130 REMark     $.name.name     for a file in a sudirectory
+4140 REMark     etc.
+4150 REMark
+4160 :
+4170 DEFine FuNction RFile$(a$,c%)
+4180 LOCal p
+4190  IF a$='$'
+4200   RETurn ReadFile$(RootDirectory,2048,c%)
+4210  ELSE
+4220   FOR p=LEN(a$)TO 1 STEP -1:IF a$(p)='.'THEN EXIT p
+4230   IF a$(p)='.'
+4240    RETurn GetFile$(RFile$(a$(TO p-1),-1),a$(p+1TO),c%)
+4250   ELSE
+4260    PRINT#0;'Invalid path name'
+4270    RETurn ''
+4280   END IF
+4290  END IF
+4300 END DEFine
+4310 :
+4320 DEFine PROCedure xcat(a$)
+4330  LDir RFile$(a$,-1)
+4340 END DEFine
+4350 :
+4360 DEFine PROCedure xcopy(a$,b$)
+4370 LOCal c%,c$
+4380  IF b$=''
+4390   c%=1
+4400  ELSE
+4410   c%=FOP_OVER(b$)
+4420   IF c%<0
+4430    REPORT#0,c%
+4440    RETurn
+4450   END IF
+4460  END IF
+4470  c$=RFile$(a$,c%)
+4480  IF c%<>1THEN CLOSE#c%
+4490 END DEFine

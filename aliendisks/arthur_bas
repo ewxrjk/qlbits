@@ -1,0 +1,146 @@
+1000 REMark
+1010 REMark Archimedes (Arthur 800K) copying utilities
+1020 REMark (D format)
+1030 REMark
+1040 REMark By Richard Kettlewell
+1050 REMark
+1060 REMark The main utilities are
+1070 REMark
+1080 REMark       adir d$         -       List directory
+1090 REMark       acopy s$,d$     -       Arthur -> QDOS copy
+1100 REMark
+1110 REMark Separate directory names in a path with a .
+1120 REMark
+1130 REMark The D format is mostly obsolete, and this program will not be
+1140 REMark developed further.
+1150 REMark
+1160 REMark Needs TK2 and a disk drive; no Minerva dependencies
+1170 REMark
+1180 :
+1190 STOP
+1200 DEFine FuNction sector(arcs)
+1210  RETurn (arcs MOD 20)DIV 4
+1220 END DEFine
+1230 :
+1240 DEFine FuNction side(arcs)
+1250  RETurn (arcs MOD 40)DIV 20
+1260 END DEFine
+1270 :
+1280 DEFine FuNction track(arcs)
+1290  RETurn arcs DIV 40
+1300 END DEFine
+1310 :
+1320 DEFine FuNction qset(se,si,tr)
+1330  RETurn se+256*(si+256*tr)
+1340 END DEFine
+1350 :
+1360 DEFine FuNction qval(arcs)
+1370  RETurn qset(sector(arcs),side(arcs),track(arcs))
+1380 END DEFine
+1390 :
+1400 DEFine FuNction sdir$(f$,arcs,length)
+1410 LOCal n,b$,l,length1,arcs1
+1420  IF NOT length THEN RETurn ''
+1430  GET#3\qval(arcs),a$
+1440  a$=a$(6 TO)
+1450  length1=length-1024:arcs1=arcs+4
+1460  REPeat l
+1470   IF NOT length1 THEN EXIT l
+1480   GET#3\qval(arcs1),b$:a$=a$&b$
+1490   arcs1=arcs1+4:length1=length1-1024
+1500  END REPeat l
+1510  FOR n=1 TO (length DIV 26)*26-25 STEP 26
+1520   IF a$(n)=CHR$(0) THEN RETurn ''
+1530   b$=a$(n TO n+9)
+1540   IF CHR$(13)INSTR b$ THEN b$=b$(1 TO CHR$(13)INSTR b$-1)
+1550   IF b$==f$ THEN RETurn a$(n TO n+25)
+1560  END FOR n
+1570  RETurn ''
+1580 END DEFine
+1590 :
+1600 DEFine FuNction peekw(a$,a)
+1610  RETurn CODE(a$(a+1))+256*CODE(a$(a+2))
+1620 END DEFine
+1630 :
+1640 DEFine FuNction peekl(a$,a)
+1650  RETurn peekw(a$,a)+65536*peekw(a$,a+2)
+1660 END DEFine
+1670 :
+1680 DEFine FuNction find$(f$,arcs,length)
+1690 LOCal arcs1,p$,p
+1700  IF f$='' THEN RETurn ''
+1710  IF f$(LEN(f$))='.' THEN f$=f$(1 TO LEN(f$)-1)
+1720  p='.'INSTR f$
+1730  IF p THEN p$=f$(1 TO p-1):f1$=f$(p+1 TO):ELSE p$=f$:f1$=''
+1740  g$=sdir$(p$,arcs,length)
+1750  IF f1$='' OR g$='' THEN RETurn g$
+1760  RETurn find$(f1$,peekw(g$,22),peekl(g$,18))
+1770 END DEFine
+1780 :
+1790 DEFine PROCedure _copy(arcs,length,o$)
+1800 LOCal arcs1,n,c$
+1810  arcs1=arcs
+1820  c%=FOP_OVER(o$):IF c%<0 THEN PRINT#0;'Cannot open ACOPY destination file.':REPORT#0,c%:RETurn
+1830  FOR n=1 TO length DIV 1024:GET#3\qval(arcs1),a$:PRINT#c%;a$;:arcs1=arcs1+4
+1840  GET#3\qval(arcs1),a$:PRINT#c%;a$(1 TO length MOD 1024);
+1850  CLOSE#c%
+1860 END DEFine
+1870 :
+1880 DEFine PROCedure acopy(s$,d$)
+1890 LOCal s1$,dr
+1900  s1$=s$
+1910  dr=1
+1920  IF s1$='' THEN RETurn
+1930  IF s1$(2)=':'
+1940   dr=s1$(1)
+1950   s1$=s1$(3 TO)
+1960  END IF
+1970  OPEN#3,'flp'&dr&'_*d3d'
+1980  ar$=find$(s1$,4,2048)
+1990  IF ar$='' THEN PRINT#0;'Cannot open ACOPY source file':REPORT#0,-7:RETurn
+2000  _copy peekw(ar$,22),peekl(ar$,18),d$
+2010  CLOSE#3
+2020 END DEFine
+2030 :
+2040 DEFine PROCedure adir(d$)
+2050 LOCal d1$,dr,ar,le,ar$,a$,l
+2060  dr=1:d1$=d$
+2070  IF d1$<>''
+2080   IF d1$(2)=':'
+2090    dr=d1$(1)
+2100    IF LEN(d1$)>2 THEN d1$=d1$(3 TO):ELSE d1$=''
+2110   END IF
+2120  END IF
+2130  OPEN#3,'flp'&dr&'_*d3d'
+2140  PRINT
+2150  IF d1$=''
+2160   ar=4:le=2048
+2170  ELSE
+2180   ar$=find$(d1$,4,2048)
+2190   ar=peekw(ar$,22)
+2200   le=peekl(ar$,18)
+2210  END IF
+2220  GET#3\qval(ar),a$:a$=a$(6 TO)
+2230  dr=le
+2240  REPeat l
+2250   le=le-1024:ar=ar+4
+2260   IF NOT le THEN EXIT l
+2270   GET#3\qval(ar),ar$:a$=a$&ar$
+2280  END REPeat l
+2290  CLOSE#3
+2300  ar=dr DIV 26
+2310  FOR n=1 TO (dr DIV 26)*26-1 STEP 26
+2320   IF a$(n)=CHR$(0) THEN EXIT n
+2330   ar$=a$(n TO n+9)
+2340   IF CHR$(13)INSTR ar$ THEN ar$=ar$(1 TO CHR$(13)INSTR ar$-1)
+2350   PRINT ar$;TO 12;
+2360   ar$=a$(n TO n+25)
+2370   IF peekw(ar$,24)=3072 THEN PRINT '(D)   ';:ELSE PRINT '      ';
+2380   PRINT peekl(ar$,18);' bytes.'
+2390  END FOR n
+2400 END DEFine
+2410 :
+2420 DEFine PROCedure sv
+2430  SAVE_O'flp1_dfs_arc_arthur_read_bas'
+2440  SAVE_O'flp2_dfs_arc_arthur_read_bas'
+2450 END DEFine

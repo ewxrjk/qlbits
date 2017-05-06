@@ -1,0 +1,284 @@
+Non-Ql Disk Formats
+===================
+
+1 Introduction
+
+This file describes a set of associated programs all concerned with
+reading data of disks in various formats, and (in some cases)
+performing some basic conversions. All are based on 3.5" double sided
+disks, but some will probably work on 5.25" and single sided variants.
+
+All of the programs include basic instructions at the beginning, which
+is more useful than referring to a separate document whilst using them.
+They all need TK2, and (I hope) have been stripped of Minerva
+dependencies. Note, also, that (as originallu supplied) all files are
+in subdirectory "DFS_".
+
+I make no guarantee of any sort about these programs, and cannot be
+held responsible for any damage or loss to programs or data that may
+arise from their use or misuse.
+
+On the other hand, if you let me know about any bugs you find then I
+will have a go at correcting them. If you have documentation on some
+other disk format and can supply and example disk or two, then I may
+have a go at writing code to read those. (Note that some formats
+require non-standard disk hardware, which the Ql doesn't have.)
+
+I have no idea whether these will work with the Miracle Gold Card. If
+you want to find out, then you can buy me one [or try running them...]
+
+        Richard Kettlewell
+        rjk@greenend.org.uk
+
+1.1 Future Developments
+
+An obvious future development would be to add routines for two way file
+transfer. Other possibilities would including rewriting in C, which
+would improve speed a bit, and adding wildcard facilities.
+
+2 The Acorn Archimedes
+
+2.1 ARTHUR_BAS
+
+This program reads the (now obsolete) D format disks, as produced by the
+Arthur operating system (also now obsolete.)
+
+2.1.1 Directory
+
+To get a directory, type a command like
+
+        adir '[<drive>:][<dirname>{.<dirname>}]'
+
+e.g.
+
+        adir '1:'
+        adir '1:subdir'
+        adir '1:subdir.subdir'
+        adir ''
+        adir 'subdir'
+        adir 'subdir.subdir'
+        adir '2:'
+
+        etc.
+
+2.1.2 File Copying
+
+To copy a file from an Arthur disk to any QDOS device, type something like
+
+        acopy '[<drive>:]{<dirname>.}<filename>','<qdos filename>'
+
+e.g.
+
+        acopy '1:file','scr_'
+        acopy 'file','scr_480x200a16x0'
+        acopy 'subdir.file' to 'ram1_file'
+        acopy '2:file','ser1'
+
+        etc.
+
+This program is based on no documentation of any shape or form and
+cannot therefore be expected to be perfect. Since the D format is now
+of little real use, do not expect any further development of this
+program.
+
+2.2 RISCOS_BAS
+
+This a rather more useful program which reads the more recent E format
+disks - the current standard in the Archimedes world. It is quite
+different to the above in several ways.
+
+2.2.1 Selecting Disks
+
+You must select which drive to use by the mount procedure:-
+
+        mount <drivenumber>
+
+e.g.
+
+        mount 1                         Select drive 1
+        mount 2                         Select drive 2
+
+        etc.
+
+If you change the disk in the drive, then you must call this procedure
+again since the procedure sets up an array of the map. It's quite slow,
+which is why it is not done automatically.
+
+2.2.2 Directory
+
+To get a directory, you need:-
+
+        xcat '${.<subdir>}'
+
+e.g.
+
+        xcat '$'
+        xcat '$.subdir'
+
+Note that $ represents the root directory, and is mandatory.
+
+The directory is listed in this format:-
+
+Column          Use
+
+0               Filename
+16              Filetype
+                        The name for those that I know, the hex code for those
+                        that I don't.
+ 16             Load address (if the file has one - else file type)
+ 25             Execution address (if the file has one)
+34              R (can read) flag
+35              W (can write) flag
+36              L (file locked) flag
+37              D (directory) flag
+
+The list of filetypes was supplied by an Arc owning friend. It's not
+complete, but it is fairly easy to add to.
+
+2.2.3 File Copying
+
+To copy a file to a QDOS device, you need:-
+
+        xcopy '${.<subdir>}.<filename>','[<qdos filename>]'
+
+If you pass a null string as the QDOS filename, then the file will be
+written to channel #1.
+
+e.g.
+
+        xcopy '$.file','ram1_file'
+        xcopy '$.subdir.file',''
+
+There is no real reason why you should not copy a directory to a QDOS
+file e.g.
+
+        xcopy '$','ram1_temp'
+
+but there is no reason why you should either.
+
+Note that I have been unable to test this program with a fragmented
+disk. Since RISCOS avoids fragmentation if it can, any problem that
+might exist should be rare - but if you do come across some difficulty,
+I would appreciate a look at a disk that causes problems. (Make sure
+that the one that you actually post causes problems, not just that one
+that you copied it off.)
+
+2.3 BASICV_BBC
+
+This is the BBC basic source file (copied to the Ql) of the program
+which eventually evolved into dfs_arc_basicV_bas. (Basic V is the
+version of BBC Basic which the Archimedes runs.)
+
+2.4 BASICV_BAS
+
+This program takes a basic source file copied from an Archimedes disk
+and converts it into an ASCII file. Follow the on screen prompts. The
+program mentioned above would be a good starting point, since it tells
+you what to set the variable listo% to for various effects.
+
+3 SAMDOS
+
+3.1 SAM_BAS
+
+You can run this program for file copying; there are also some
+procedures.
+
+3.1.1 RUN
+
+When RUN, this program copies files from SAM Coupe disks (a computer
+based on the Spectrum - a bit - and now sold by SAM Computers Ltd.) to
+QDOS devices. RUN the program and follow the on screen instructions;
+the SAM disk should be in drive 1.
+
+3.1.2 STQ
+
+This converts a SAM screen font to a Ql screen font. Both files should
+be on Ql disks.
+
+3.1.3 VS
+
+This converts a SAM screen to a Ql screen. It's very slow. Follow the
+prompts. Again, all files on Ql disks.
+
+3.1.4 VF
+
+This is a trivial procedure which views a Ql font (I wrote it after
+porting a bunch of SAM fonts.) It needs Minerva to work. You will
+probably never, ever need it. (For those without Minerva, conversion
+should be quite trivial.)
+
+3.2 MasterDOS
+
+The program appears to cope with MasterDOS disks, but all the files in
+subdirectories are displayed as being in the root directory. I can live
+with this for now.
+
+4 MS-DOS
+
+This program originally started out as Atari ST only, but has since
+been updated to allow MS-DOS disks as well. Of all the programs, it has
+been around the longest.
+
+4.1 MSDOS_BAS
+
+This is for reading MS-DOS (i.e. IBM, Amstrad, Compaq etc.) and TOS
+(i.e. Atari ST) disks.
+
+4.1.1 Directories
+
+        cat '[<drive>:][{<subdir>\}<subdir>]'
+
+e.g.
+
+        cat 'a:'
+        cat ''
+        cat 'b:'
+        cat 'b:subdir'
+        cat 'subdir\subdir'
+
+Drive a: corresponds to flp1_ and b: to flp2_.
+
+4.1.2 File Copying
+
+        xcopy '[<drive>:]{<subdir>\}<filename>','[<qdos filename>]'
+
+If no QDOS filename is supplied then the file is sent to channel #1.
+
+e.g.
+
+        xcopy 'a:file','ram1_file'
+        xcopy 'b:dir\file',''
+
+4.1.3 Disk Information
+
+The command
+
+        statistics
+
+will prompt you to insert a disk in drive 1, and then list some of the
+information found in the boot sector. This may or may not be of
+interest.
+
+5 QDOS
+
+5.1 QDOS_BAS
+
+This program reads Ql disks and copied files to a QDOS device. Wow.
+
+In fact, it does this by direct sector access and is intended to be
+ported to other machines as necessary. Note that it only works on the
+original no-subdirectories format, since that's all I have at the time
+of writing.
+
+Feel free to port this to other machines, as long as you mention who
+worked out the original code. Since anyone capable of porting this will
+understand the instructions in the REMarks at the start, I see no need
+to document it here (it's of no use to anyone else.)
+
+5.2 QXPLORE_BAS
+
+This program contains a few useful procedures for exploring the
+structures at the start of the Ql disk.
+
+See the REMark's for information - like 5.1, this is of little use to
+the non-technical.
