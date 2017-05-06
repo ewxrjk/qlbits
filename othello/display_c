@@ -1,0 +1,110 @@
+/*
+ * Othello
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#include	"othello.h"
+#include	<stdio.h>
+#include	<qdos.h>
+#include	<string.h>
+#include	<stdarg.h>
+
+/*
+ * Redraw the board from scratch
+ */
+void redraw_all(void)
+{
+	int i;
+
+	sd_clear(con_id, -1);
+	sd_scale(con_id, -1, BSIZE*1.25, BSIZE*-0.125, BSIZE*-0.125);
+	sd_flood(con_id, -1, 1);
+	sd_setin(con_id, -1, 228);
+	sd_iline(con_id, -1, 0, 0, 0, BSIZE);
+	sd_iline(con_id, -1, BSIZE, 0, BSIZE, BSIZE);
+	sd_flood(con_id, -1, 0);
+	sd_setin(con_id, -1, 7);
+	for(i = 0; i <= BSIZE; ++i) {
+		sd_iline(con_id, -1, 0, i, BSIZE, i);
+		sd_iline(con_id, -1, i, 0, i, BSIZE);
+	}
+	memset(&vdu_board, 0, sizeof vdu_board);
+	update_board();
+	message(NULL);
+}
+
+/*
+ * Update the displayed board
+ */
+void update_board(void)
+{
+	int x,y;
+	char s[40];
+
+	sprintf(s, "White: %d Black: %d",
+		main_board.pieces[INDEX(WHITE)],
+		main_board.pieces[INDEX(BLACK)]);
+	sd_pos(con_id, -1, 0, 1);
+	io_sstrg(con_id, -1, s, strlen(s));
+	sd_clrrt(con_id, -1);
+
+	for(x = 0; x < BSIZE; ++x)
+		for(y = 0; y < BSIZE; ++y)
+			if(vdu_board.board[x][y] != main_board.board[x][y]) {
+				if(WHITE == (vdu_board.board[x][y] = main_board.board[x][y]))
+					sd_setin(con_id, -1, 7);
+				else
+					sd_setin(con_id, -1, 0);
+				sd_flood(con_id, -1, 1);
+				sd_elipse(con_id, -1, (double)x + 0.5, (double)y + 0.5, 1.0, 0.4, 0.0);
+				sd_flood(con_id, -1, 0);
+				sd_setin(con_id, -1, 7);
+			}
+}
+
+/*
+ * Write a message onto the top line
+ */
+void message(char *text, ...)
+{
+	static char buffer[60];
+
+	if(text) {
+		va_list ap;
+		va_start(ap, text);
+		vsprintf(buffer, text, ap);
+		va_end(ap);
+	}
+	sd_pos(con_id, -1, 0, 0);
+	io_sstrg(con_id, -1, buffer, strlen(buffer));
+	sd_clrrt(con_id, -1);
+}
+
+/*
+ * Do some waiting
+ */
+void wait_a_bit(void)
+{
+	mt_susjb((jobid_t)-1, 50, NULL);
+}
+
+/*
+ * Wait for a keypress
+ * (which is lost)
+ */
+void wait_for_key(void)
+{
+	char c;
+	io_fbyte(con_id, -1, &c);
+}
+
+/*
+ * Draw a cursor
+ */
+void draw_cursor(int x, int y)
+{
+	sd_setmd(con_id, -1, -1);
+	sd_iline(con_id, -1, x, y, x+1, y+1);
+	sd_iline(con_id, -1, x+1, y, x, y+1);
+	sd_setmd(con_id, -1, 0);
+}

@@ -1,0 +1,215 @@
+/*
+ * Othello
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+/*#define DEBUG	1*/
+#include	"othello.h"
+#include	<string.h>
+#include	<qdos.h>
+#include	<limits.h>
+#include	<assert.h>
+
+static int legal_direction(board *, int, int, int, int, int);
+static void apply_direction(board *, int, int, int, int, int);
+
+/*
+ * Return BLACK, WHITE, 0 or 2 for the given place on the board
+ */
+int piece_at(board *b, int x, int y)
+{
+	if(x < 0 || x >= BSIZE || y < 0 || y >= BSIZE)
+		return 2;
+	return b->board[x][y];
+}
+
+/*
+ * Return true if a move is legal
+ */
+int legal_move(register board *b, register int x, register int y, register int player)
+{
+	int dx,dy;
+
+	if(b->board[x][y])
+		return 0;
+	for(dx = -1; dx <= 1; ++dx)
+		for(dy = -1; dy <= 1; ++dy)
+			if(dx != 0 || dy != 0)
+				if(legal_direction(b, x, y, player, dx, dy))
+					return 1;
+	return 0;
+}
+
+static int legal_direction(board *b, register int x, register int y, int player, register int dx, register int dy)
+{
+	register int other = -player;
+	int p;
+	int opps = 0;
+
+	while((p = piece_at(b, x += dx, y += dy)) == other)
+		++opps;
+	return p == player && opps != 0;
+}
+
+/*
+ * Carry out a move on a board, returning 0 if it's an illegal move
+ * and 1 if it's legal
+ */
+int apply_move(board *b, int x, int y, int player)
+{
+	int flag = 0;
+	int dx,dy;
+
+	if(b->board[x][y])
+		return 0;
+	for(dx = -1; dx <= 1; ++dx)
+		for(dy = -1; dy <= 1; ++dy)
+			if(dx != 0 || dy != 0)
+				if(legal_direction(b, x, y, player, dx, dy)) {
+					flag = 1;
+					apply_direction(b, x, y, player, dx, dy);
+				}
+	if(flag) {
+		b->board[x][y] = player;
+		++b->pieces[INDEX(player)];
+	}
+	return flag;
+}
+
+static void apply_direction(board *b, int x, int y, int player, int dx, int dy)
+{
+	int other = -player;
+
+	x += dx;
+	y += dy;
+	while(piece_at(b, x, y) == other) {
+		b->board[x][y] = player;
+		++b->pieces[INDEX(player)];
+		--b->pieces[INDEX(other)];
+		x += dx;
+		y += dy;
+	}
+}
+
+/*
+ * Do a move, return the status
+ */
+int generate_move(int player)
+{
+	int x, y;
+	char *playername = (player == WHITE ? "WHITE" : "BLACK");
+
+	if(level[INDEX(player)] == 0) {
+		for(x = 0; x < BSIZE; ++x) for(y = 0; y < BSIZE; ++y)
+			if(legal_move(&main_board, x, y, player))
+				goto is_ok;
+		message("%s: [Pass]", playername);
+		wait_a_bit();
+		return PASS;
+is_ok:
+		for(;;) {
+			unsigned char c;
+
+			draw_cursor(cursor_x, cursor_y);
+			message("%s: %c%d", playername, cursor_x + 'A', cursor_y + 1);
+			sd_cure(con_id, -1);
+			io_fbyte(con_id, -1, &c);
+			draw_cursor(cursor_x, cursor_y);
+			switch(c) {
+				case 27:
+					exit(0);
+				case 10:
+				case 32:
+					if(apply_move(&main_board, cursor_x, cursor_y, player)) {
+						update_board();
+						return OK;
+					}
+					break;
+				case '1': case '2': case '3': case '4':
+				case '5': case '6': case '7': case '8':
+				case '9': case '0':
+					cursor_y = (c - '1')%BSIZE;
+					break;
+				case 'a': case 'b': case 'c': case 'd':
+				case 'e': case 'f': case 'g': case 'h':
+				case 'i': case 'j': case 'k': case 'l':
+				case 'm': case 'n': case 'o': case 'p':
+				case 'q': case 'r': case 's': case 't':
+				case 'u': case 'v': case 'w': case 'x':
+				case 'y': case 'z':
+					c -= 32;
+				case 'A': case 'B': case 'C': case 'D':
+				case 'E': case 'F': case 'G': case 'H':
+				case 'I': case 'J': case 'K': case 'L':
+				case 'M': case 'N': case 'O': case 'P':
+				case 'Q': case 'R': case 'S': case 'T':
+				case 'U': case 'V': case 'W': case 'X':
+				case 'Y': case 'Z':
+					cursor_x = (c - 'A')%BSIZE;
+					break;
+				case 192:
+					cursor_x = (cursor_x+BSIZE-1)%BSIZE;
+					break;
+				case 200:
+					cursor_x = (cursor_x+1)%BSIZE;
+					break;
+				case 208:
+					cursor_y = (cursor_y+1)%BSIZE;
+					break;
+				case 216:
+					cursor_y = (cursor_y+BSIZE-1)%BSIZE;
+					break;
+				case 237:
+					redraw_all();
+					break;
+			}
+		}	
+	} else {
+		int best_x = -1, best_y = -1, best_value = -32768;
+		int move_value;
+		board dummy_board;
+
+		for(x = 0; x < BSIZE; ++x) for(y = 0; y < BSIZE; ++y) {
+			debug(draw_cursor(x,y);)
+			if(legal_move(&main_board, x, y, player)) {
+				debug(message("Checking %c%d", x+'A', y+1);)
+				dummy_board = main_board;
+				apply_move(&dummy_board, x, y, player);
+				move_value = eval_board(&dummy_board, player, level[INDEX(player)]-1);
+				if(move_value >= best_value) {
+					debug(message("Using %c%d : %d", x+'A', y+1, move_value);)
+					debug(wait_for_key();)
+					best_x = x;
+					best_y = y;
+					best_value = move_value;
+				}
+				/*
+				 * There was a bug here, in that sometimes the computer passed
+				 * when this was not appropriate. The reason why? The
+				 * >= sign in "if(move_value >= best_value)" was a > sign.
+				 * Why is this a problem? If the computer is looking a move
+				 * or so ahead, and can only do one thing at each point,
+				 * and forces passing LATER ON, then -32768 will get
+				 * returned from eval_board when moves are possible. So,
+				 * the > means that the move doesn't register.
+				 * Hence, some moves get 'missed.'
+				 * Similar comment applies to the >= in brain.c
+				 */
+			}
+			debug(draw_cursor(x,y);)
+		}
+		if(best_x == -1 && best_y == -1) {
+			message("%s: [Pass]", playername);
+			wait_a_bit();
+			return PASS;
+		}
+		message("%s: %c%d", playername, best_x + 'A', best_y + 1);
+		if(!apply_move(&main_board, best_x, best_y, player)) {
+			message("Error in move.c");
+			wait_a_bit();
+			exit(-19);
+		}
+		update_board();
+		return OK;
+	}
+}

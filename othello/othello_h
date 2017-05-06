@@ -1,0 +1,64 @@
+/*
+ * Othello
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#include	<stddef.h>
+
+#ifndef DEBUG
+#define DEBUG	0
+#endif
+
+#if	DEBUG
+#define debug(x)	x
+#else
+#define debug(x)
+#endif
+
+#if	MAIN
+#define EXTERN
+#else
+#define EXTERN		extern
+#endif
+
+#if	C68
+#define	signed
+#endif
+
+#define INDEX(player)	(((player)+1)>>1)
+#define PLAYER(index)	(((index)<<1)-1)
+
+#define BSIZE		8
+
+#define BLACK		-1
+#define WHITE		1
+
+#define OK			0					/* Move made */
+#define PASS		1					/* Forced to pass */
+
+/* Every board definition records the number of pieces that each side has */
+typedef struct {
+	signed char board[BSIZE][BSIZE];
+	short pieces[2];
+} board;
+
+EXTERN int level[2];					/* Computer levels, 0 for human [carbonist!] */
+EXTERN board main_board;				/* The displayed board */
+EXTERN board vdu_board;					/* Board as it is displayed */
+EXTERN chanid_t con_id;					/* ID of stdout */
+EXTERN int cursor_x, cursor_y;			/* Cursor position */
+EXTERN char thicko;						/* Weight corners and edges? */
+
+int eval_board(board *b, int player, int level);
+void redraw_all(void);
+void update_board(void);
+void message(char *, ...);
+void wait_a_bit(void);
+void wait_for_key(void);
+int main(int argc, char **argv);
+int piece_at(board *b, int x, int y);
+int legal_move(board *b, int x, int y, int player);
+int apply_move(board *b, int x, int y, int player);
+int generate_move(int player);
+void draw_cursor(int x, int y);
+

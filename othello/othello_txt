@@ -1,0 +1,270 @@
+Othello
+=======
+
+(c) 1992 Richard Kettlewell
+
+Running Othello
+---------------
+
+	The generic command for running Othello is:-
+
+		Othello [[white] <level>|human] [black <level>|human] [ignorant]
+
+	Most Ql users do not have a shell type program, so the EX or EW
+command must be used instead.
+
+	For example,
+
+		ex Othello;'3'
+
+sets the computer on level 3, playing white.
+
+		ex Othello;'white human black 4'
+
+sets the computer on level 4, playing black, with a human (presumably)
+playing white.
+
+		ex Othello;'2 black 2'
+
+plays the computer against itself, both on level 2.
+
+		ex Othello
+
+sets the computer on level 2 playing white, with a human playing black.
+
+	The 'ignorant' option reduces the intelligence of the routine
+for picking a move.
+
+	The program is fully multitasking, and may run in the background
+(easier with Pointer Interface (Qram) or Taskmaster or similar software)
+while doing something else (like writing this text, for example.)
+
+	The program was developed using MicroEMACS 3.11 and C68 3.01, on
+a Gold Card v2.28 with Minerva 1.82.
+
+Making Moves
+------------
+
+	The cursor is 'x' shaped, and may be moved with the cursor keys,
+or by pressing a letter A-H or number 1-8 to select row or column. ENTER
+or SPACE indicate where you want to put your piece; they will be ignored
+if the move would be illegal. If you move the cursor off the edge of the
+board then it will come back on the other side.
+
+	If you have to pass then you are not given the option of a move.
+
+	Pressing ESCape will terminate the game; pressing CTRL F2 will
+redraw everything.
+
+	When the game is over, pressing ESCape will terminate the
+program, any other key will start again at the same level.
+
+Computer Player
+---------------
+
+	The computer can work at any level from 1 upwards, although
+above level 4 the game is rather slow (on a Gold Card. Without Gold
+Card, even slower, I imagine.)
+
+	The level is essentially the number of moves the computer tries
+out before choosing a rather brutish method of board evaluation i.e. the
+best board is the one where I have the most pieces. So on level 1, the
+computer will always try and get as many pieces as possible immediately;
+on level 2, it will try and prevent you from doing so; and so on.
+
+	It is still quite easy for a human (in particular, me) to beat
+the computer on level 4. If you play it against a different level of
+itself, you may find some odd results e.g. the higher level loses.
+
+	You will also find that the computer tends to play on the right
+hand side of the board more often than the left. This is a consequence
+of the search algorithm used.
+
+Rules of the Game
+-----------------
+
+	Othello (or Reversi as it is sometimes called) is played on an
+8x8 grid. To start, 2 black pieces and 2 white pieces are placed in a
+checkered arrangement on the four central squares.
+
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  8
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  7
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  6
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | W | B |   |   |   |  5
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | B | W |   |   |   |  4
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  3
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  2
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  1
+		+---+---+---+---+---+---+---+---+
+
+		  A   B   C   D   E   F   G   H
+
+	Each player then places a piece on the board in turn, black
+first (but note: all possible first moves by black are the same, apart
+from a rotation or reflection.)
+
+	When a piece is placed on the board, it must positioned such
+that it is adjacent to at least on piece of the opposite colour, and
+that in at least one of the 8 directions from it there is an unbroken
+line of opposition pieces terminated with one of the players own pieces.
+For example, at the start of the game, black may go in any of the
+squares marked X as shown:-
+
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  8
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  7
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | X |   |   |   |   |  6
+		+---+---+---+---+---+---+---+---+
+		|   |   | X | W | B |   |   |   |  5
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | B | W | X |   |   |  4
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   | X |   |   |   |  3
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  2
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  1
+		+---+---+---+---+---+---+---+---+
+
+		  A   B   C   D   E   F   G   H
+
+	When the piece is placed onto the board, the opposition pieces
+which are 'trapped' change colour. When playing 'for real,' pieces with
+white on one side and black on the other are used so that they may be
+turned over to change colour.
+
+	Suppose that black played E3. Then the white piece at E4 becomes
+black:-
+
+
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  8
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  7
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  6
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | W | B |   |   |   |  5
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | B | B |   |   |   |  4
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   | B |   |   |   |  3
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  2
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  1
+		+---+---+---+---+---+---+---+---+
+
+		  A   B   C   D   E   F   G   H
+
+	Suppose that the first four moves of the game are E3, D3, C5,
+D6. The board then looks like this:-
+
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  8
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  7
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | W |   |   |   |   |  6
+		+---+---+---+---+---+---+---+---+
+		|   |   | B | W | B |   |   |   |  5
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | W | B |   |   |   |  4
+		+---+---+---+---+---+---+---+---+
+		|   |   |   | W | B |   |   |   |  3
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  2
+		+---+---+---+---+---+---+---+---+
+		|   |   |   |   |   |   |   |   |  1
+		+---+---+---+---+---+---+---+---+
+
+		  A   B   C   D   E   F   G   H
+
+	The white piece at D5 lies between two black pieces. However,
+this situation did not arise because one of the black pieces was put
+down; the white piece was captured from black by D6.
+
+	Pieces change colour ONLY when they are trapped by a piece that
+is put down, NEVER because the are trapped by pieces changing colour
+around them.
+
+	When playing the computer version, of course, the Ql will
+automatically work out which pieces change colour in accordance with
+this rule and should get it right every time (if it doesn't then I would
+like to know!)
+
+	The game is won by the player with the most pieces on the board
+when it is no longer possible to put any pieces down - i.e. the board is
+full, or in such an arrangment that both sides must pass.
+
+Hints
+-----
+
+	A piece placed in the corner does not appear on a straight line
+between any two other squares on the board. So once put down, it can
+never change colour. Equally, a line all the same colour running down
+one edge starting at a corner is 'fixed'.
+
+	So getting edges and corners is desirable; and preventing the
+opposition from getting them is also desirable. This basically means not
+putting any piece next to a corner if you can possibly help it (you will
+have to put pieces next to edges at least some of the time, but in the
+early stages you can avoid that as well.)
+
+	It is not always worthwhile building up long lines of your
+colour: they may be captured by the other side in a single move. Towards
+the end of the game, however, this tactic becomes less useful since much
+of the board will be fixed when there are only 3 or 4 places left to go.
+
+Automatic Games
+---------------
+
+	On a Gold Card v2.28, with Minerva 1.82, the total time for
+various automatic games with option "ignorant" is as follows:-
+
+	Level		Result
+
+	White	Black	White	Black	Time (seconds)
+	1	1	44	20	5
+	1	2	32	32	10
+	1	3	17	47	45
+	1	4	6	56	233 (both must pass)
+	2	1	21	43	10
+	2	2	14	50	16
+	2	3	27	37	53
+	2	4	2	62	377
+	3	1	43	21	36
+	3	2	33	31	46
+	3	3	29	35	102
+
+	In games such as 1-4 and 2-4 it is interesting to watch the way
+the black builds up an impenetrable block on the right hand side. The
+times for these games - 6m17s for 2-4 - are short enough numerically,
+but they seem to go on forever if the only reason your running them is
+to find out how they end...
+
+Speed
+-----
+
+	Level 5 is very slow, even on a Gold Card. It is obvious that
+higher levels will be unplayably slow; but a human can beat level 4 or 5
+with a bit of thought with and without "ignorant"
+
+	To introduce greater intelligence into the lower levels, I
+modified the routine which evaluates a board so that the piece occupying
+a corner or edge square has a different weight from pieces elsewhere.
+Since gaining corners and edges is a good thing in the long term, the
+middle levels of the program should be a good deal more intelligent.
+
+	The feature may disabled and v1.0 style play returned to with
+the 'ignorant' command line option.

@@ -1,0 +1,43 @@
+/*
+ * Othello
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+/*#define		DEBUG 1*/
+#include	"othello.h"
+#include	<limits.h>
+
+/*
+ * Evaluate a board
+ */
+int eval_board(register board *b, register int player, int level)
+{
+	register int best_value = -32768;
+	register int x,y;
+	int board_value;
+	board b1;
+
+	--level;
+	if(level < 0) {
+		best_value = b->pieces[INDEX(player)] - b->pieces[INDEX(-player)];
+		if(!thicko) {
+			/* Weight edges (double) and corners (triple) */
+			if(player > 0) {
+				for(x = 0; x < BSIZE; ++x)
+					best_value += b->board[x][0] + b->board[x][BSIZE-1] + b->board[0][x] + b->board[BSIZE-1][x];
+			} else {
+				for(x = 0; x < BSIZE; ++x)
+					best_value -= b->board[x][0] + b->board[x][BSIZE-1] + b->board[0][x] + b->board[BSIZE-1][x];
+			}
+		}
+		debug(message("Value is %d", best_value);)
+		debug(wait_for_key();)
+	} else for(x = 0; x < BSIZE; ++x) for(y = 0; y < BSIZE; ++y) if(legal_move(b, x, y, player)) {
+		b1 = *b;
+		apply_move(&b1, x, y, player);
+		board_value = -eval_board(&b1, -player, level);
+		if(board_value >= best_value)
+			best_value = board_value;
+	}
+	return best_value;
+}
