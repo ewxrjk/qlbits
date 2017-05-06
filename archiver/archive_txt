@@ -1,0 +1,294 @@
+                            Archive Program
+                            ===============
+
+                     (c) 1992 By Richard Kettlewell
+
+SYNOPSIS
+
+	Archive [-cel?] [-v] archive_file {filespec}
+
+DESCRIPTION
+
+	A program for management of archives. An archive is a collection
+of files which have been compacted and then stored in a single file; the
+result  is a substantial saving of space, not only because compaction is
+used but also because the amount of 'dead' disk space is reduced.
+
+	This  archive  program  currently  supports  5 types of storage,
+including uncompacted. The compacting storage types are:-
+
+	1)  "Micro"  packing  (for  files  consisting  of a long
+	string of just one character)
+
+	2)  Run  length  compression  (for  files  with repeated
+	strings consisting of one byte)
+
+	3) Huffman packing (general application)
+
+	4) Lempel-Ziv packing (general application)
+
+	It  is  not,  however, necessary for the user to be particularly
+aware of this since the program automatically selects the most efficient
+form of compaction when it adds files to an archive.
+
+	For  information on the program, use the -? command line option.
+Among  other  things,  this  will  tell  you the version number which is
+followed  by  the  current versions number of supported storage types in
+brackets.  Later  versions  will  support all storage types supported by
+earlier versions.
+
+	The command line options are:-
+
+	-c	Create  a  new  archive. The filespecs following
+	the  archive name describe disk files to be added to the
+	new archive; any existing file with the same name as the
+	archive is destroyed.
+
+	If  the  -v  option is specified as well as -c, then the
+	compaction type chosen for each file is displayed.
+
+	-e	Extract  files. If no filespecs are listed, then
+	all  files  are  extracted; otherwise those files in the
+	archive  matching  at  least one filespec are extracted.
+	The archive itself is unaltered.	
+
+	-l	List files. The selection of which files to list
+	is  the same as the selection of files to extract. If -v
+	is  specified  then  more detailed information is listed
+	than if it is not.
+
+	-?	Help.
+
+                               File Types
+
+	The  degree  to which data gets compressed depends on what is in
+it; different type of file tend to produce different savings.
+
+	Generally  speaking,  data  which  has  already  been  compacted
+doesn't compact very well, and may increase in size: and some very small
+files  also  don't  compact  well.  So the archive program is capable of
+simply storing files uncompacted if they wouldn't shrink when compacted.
+
+	You still get a space saving when storing files like this, since
+files which are not an exact number of disk sectors long are stored more
+efficiently,  and  there  is less overhead for directory entries. On the
+other hand, access is less convenient.
+
+	Some  screen  files  can  compact  down  by  around  70% to 80%,
+especially  if  they  contain large areas of uniform colour. I shouldn't
+bank  on this happening for all screen files, though. Screen files which
+other  utilities  have  compacted using some form of run length encoding
+may  be  susceptible to efficient compaction using this program - try it
+and  see  (+compare  with  this  programs  attempts  on  the uncompacted
+screen.)
+
+	Various  C68-compiled programs gave the following results (after
+a few minutes on a Gold Card):-
+
+Filename            Length    Packed    Save CRC  Type
+=================== ========= ========= ==== ==== =====================
+flp1_cpp                62222     43623  29% AF33 Lempel-Ziv packing
+flp1_c68               105466     67689  35% 3CFB Lempel-Ziv packing
+flp1_as68               47248     31536  33% 37E6 Lempel-Ziv packing
+flp1_emacs             119564     79470  33% 2077 Lempel-Ziv packing
+
+=================== ========= ========= ====
+    4 files            334500    222417  33%
+
+	There  isn't  much  point compacting program files, they're much
+more  useful  where  you can execute them. Also, current versions of the
+Archiver  lose  any  OS  specified  information  (e.g. QDOS filetype and
+dataspace.)
+
+	The  source  for  the  archiver  program,  on  the  other  hand,
+compacted                                quite                    well:-
+	
+Filename            Length    Packed    Save CRC  Type
+=================== ========= ========= ==== ==== =====================
+archive_c               11256      5995  46% 741B Lempel-Ziv packing
+arcio_c                  2311      1405  39% BA98 Lempel-Ziv packing
+archuff_c                3271      1768  45% E361 Lempel-Ziv packing
+arclzw_c                 2878      1576  45% B128 Lempel-Ziv packing
+arcpack_c                2604      1464  43% B424 Lempel-Ziv packing
+crcclc_x                 4821      2778  42% DA59 Lempel-Ziv packing
+matching_c               1112       726  34% A9E2 Lempel-Ziv packing
+archive_txt              5688      3158  44% 551C Lempel-Ziv packing
+archive_h                1802       978  45% 7868 Lempel-Ziv packing
+makefile                  927       434  53% 9F0C Lempel-Ziv packing
+
+=================== ========= ========= ====
+   10 files             36670     20530  44%
+
+	Another  set  of  files  that  I tried compacting was the set of
+header files for the C68 compiler:-
+
+Filename            Length    Packed    Save CRC  Type
+=================== ========= ========= ==== ==== =====================
+ansi_h                   6355      2792  56% 9F09 Lempel-Ziv packing
+assert_h                  974       637  34% C5F1 Lempel-Ziv packing
+ctype_h                  2283      1144  49% 8D1D Lempel-Ziv packing
+channels_h               8978      4143  53% B532 Lempel-Ziv packing
+errno_h                  2517      1391  44% 9125 Lempel-Ziv packing
+qdos_h                   9476      4493  52% 476D Lempel-Ziv packing
+types_h                    48        48   0% 6DDC No compaction
+qptr_h                  23708      9062  61% FF19 Lempel-Ziv packing
+fcntl_h                  2106      1207  42% 676C Lempel-Ziv packing
+debug_h                   980       596  39% A298 Lempel-Ziv packing
+float_h                  3580      1457  59% 2D62 Lempel-Ziv packing
+limits_h                 1451       737  49% DC4A Lempel-Ziv packing
+error_h                    43        43   0% 2F93 No compaction
+math_h                   5531      2348  57% D23A Lempel-Ziv packing
+qlib_h                  11729      3981  66% 763D Lempel-Ziv packing
+setjmp_h                  730       434  40% 8BFF Lempel-Ziv packing
+stat_h                     46        46   0% CF32 No compaction
+stdarg_h                 1143       732  35% BAB4 Lempel-Ziv packing
+stddef_h                  148       133  10% 4D2A Lempel-Ziv packing
+stdio_h                  7808      3540  54% 0FE6 Lempel-Ziv packing
+stdlib_h                 3010      1357  54% CAE9 Lempel-Ziv packing
+string_h                 4723      1565  66% 9007 Lempel-Ziv packing
+time_h                    960       576  40% CDBF Lempel-Ziv packing
+wini_h                   1546       919  40% 128B Lempel-Ziv packing
+unistd_h                 5679      2652  53% FC32 Lempel-Ziv packing
+sys_stat_h               3217      1702  47% 5D3C Lempel-Ziv packing
+sys_types_h              2098      1251  40% 948F Lempel-Ziv packing
+dirent_h                 1226       753  38% 9EC3 Lempel-Ziv packing
+dos_h                    9999      4365  56% 2F5B Lempel-Ziv packing
+fctype_h                 1236       631  48% 64B9 Lempel-Ziv packing
+malloc_h                 2971      1654  44% BCFC Lempel-Ziv packing
+mdebug_h                 2628      1324  49% 14AE Lempel-Ziv packing
+memory_h                  410       302  26% 3560 Lempel-Ziv packing
+nice_h                   4053      1413  65% 1B8D Lempel-Ziv packing
+semaphore_h               434       296  31% 9901 Lempel-Ziv packing
+signal_h                 4355      2128  51% 10A4 Lempel-Ziv packing
+std_h                    3910      1919  50% 4759 Lempel-Ziv packing
+utime_h                   416       294  29% 58F7 Lempel-Ziv packing
+varargs_h                 985       667  32% 6003 Huffman packing
+sys_times_h               566       406  28% C32B Lempel-Ziv packing
+
+=================== ========= ========= ====
+   40 files            144056     66079  54%
+
+	A  brief  word  on  filenames:  to keep the lengths of filenames
+within  the archive down (this does in fact reduce the archive length) I
+suggest  that you arrange the directory to read files from to be the one
+that  the  files  you  wish  to compact in. Otherwise, you will get full
+device names in the archive and those are what the files are decompacted
+to - not what you probably want!
+
+	If filenames are too long then the -l option will produce untidy
+output.
+
+	A rather pointless set of files to compact were the object files
+for the archiver:-
+
+Filename            Length    Packed    Save CRC  Type
+=================== ========= ========= ==== ==== ======================
+arcio_o                  1215       812  33% 161F Lempel-Ziv packing
+archive_o                6728      4053  39% 0B4A Lempel-Ziv packing
+archuff_o                1550      1199  22% B9B7 Lempel-Ziv packing
+arclzw_o                 1463      1053  28% 9E6D Lempel-Ziv packing
+matching_o                442       338  23% 6C2B Lempel-Ziv packing
+crcclc_o                  712       710   0% CDD0 Run length compression
+arcpack_o                1363       956  29% 6F6A Lempel-Ziv packing
+
+=================== ========= ========= ====
+    7 files             13473      9307  30%
+
+	The  crcclc_o  is  sufficiently small that the 4 byte runs of 0s
+generated  by  the  XREFs  actually compact by enough to reduce the file
+length. It's barely worth it, though, with a saving of 2 bytes - this is
+in fact the only non-contrived file that I've found for which run length
+compression is the most efficient form of compaction... Using a separate
+LZW  compaction  routine  gave  a  result  of  784  bytes  after  header
+considerations  had  been  removed;  all  of  this  is  probably because
+crcclc_o was hand optimised inbetween the compiler and assemble phases.
+
+	That's  interesting,  because  it suggests that a measure of low
+level program efficiency could be obtained by studying the effectiveness
+of compacting it.
+
+	Overall,  compacting  object files gives moderate results though
+there isn't much point as they generally act is intermediate files only.
+
+                           Compression Types
+
+	I originally included a form of compression which worked out the
+number of bits necessary to represent all characters in the file - so if
+there  were  only 16 distinct characters, then only 4 bits would be used
+to write each one.
+
+	However,  after  some  effort  in trying to produce a file which
+would  actually  compact with this method more efficiently than with any
+other,  I realised that by its very nature, huffman packing would always
+be more efficient!
+
+	Huffman   packing  analyses  the  relative  frequency  of  every
+character  in  the  file  and outputs variable bit-length codes for each
+character;  the  choice  of  codes  (and there lengths) is such that the
+shortest  possible  output  using  codes  for  single characters only is
+generated.
+
+	Micro  packing  works  with  files  which  consist entirely of a
+single  character.  These  are  rare,  but  it  would  be a pretty silly
+compaction program which couldn't compact them effectively.
+
+	Run  length  packing chooses an infrequently used byte (i.e. one
+that  doesn't occur in the file, or the one which appears least) to mark
+runs of itself or any other character. A run of 256 identical characters
+may be compressed into just 3 characters this way.
+
+	Lempel-Ziv packing, which for text files and program source code
+often gives the best results, works by building up a table of strings of
+characters  that  have  appeared  in  the  file  so  far,  and replacing
+occurences  of  those strings later on with the code for the string. The
+table  is built up as it compacts, and the same table is built up on the
+fly  by  the  decompaction routine - so no table need be stored with the
+compacted data.
+
+	The  implementation  used  here empties out the table of strings
+when  it  gets  full  and  effectively  starts again; this can give more
+efficient  results than simply ceasing to add new strings when the table
+is  full, and rarely gives significantly less efficient results in cases
+where the input file repeats itself a lot.
+
+                              Data Format
+
+	The archive itself is a list of compacted files each preceded by
+a header. The header has the following variable length format:-
+
+	4 bytes		"RJK%" Recognition string
+	1 byte		Length of filename
+	n bytes		Text of filename
+	1 byte		Pack type
+	4 bytes		Length of unpacked file
+	4 bytes		Length of packed file
+	2 bytes		CRC checksum
+	2 bytes		Number of extra bytes in header
+	m bytes		Extra header bytes
+
+	This  comes  to a total of 18+n+m bytes, and this is included in
+the  total  archive length when listing files, but NOT in the individual
+packed file lengths.
+
+	The  "extra header" is a variable sized area reserved for future
+expansion.  I  am  welcome  to  ideas for what to put in this space, but
+anybody  who  adds  there  own  stuff  will probably find there archives
+unsupported. In version 1.0, there is no extra header.
+
+	16  and 32 bit values are stored with the least significant byte
+first,  despite the program being written on a 68000 based machine. This
+is just they way things turned out.
+
+	The pack types are as follows:-
+
+	0	No compaction
+	1	Micropacking
+	2	Run length compression
+	3	Huffman packing
+	4	Lempel-Ziv packing
+
+	Extra  types  will  be  added  in  the future, as more efficient
+compaction  routines  come to my attention. Earlier versions will not be
+able  to  unpack  these,  but  they  will be able to list information on
+archives containing them.
+

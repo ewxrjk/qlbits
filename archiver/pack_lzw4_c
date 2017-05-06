@@ -1,0 +1,308 @@
+/*
+ * New LZW packing program
+ *
+ * (c) 1992 Richard Kettlewell
+ *
+ * See lzw_txt.
+ *
+ * 3/9/1992 Removed need for inmax variable.
+ *          Replaced search code with linked list version
+ *          Added reset code
+ *          Eliminated iflag variable  
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+/*#define NDEBUG*/
+#include	<assert.h>
+
+#ifndef NDEBUG
+#define DEBUG(x) x
+#else
+#define DEBUG(x)
+#endif
+
+#define MAXBITS			12				/* Maximum bits in a code (8 < MAXBITS < 16) */
+#define CHARBITS		8				/* Bits in a character */
+
+#define CODES			(1<<MAXBITS)	/* How many codes */
+#define CHARS			(1<<CHARBITS)	/* Number of distinct characters */
+
+struct NODE {
+	unsigned char character;			/* Last character in string */
+	unsigned char first;				/* First character in string */
+	short root;							/* Previous characters, or -1 */
+	short next;							/* Another node with same root */
+	short child;						/* A node which this is the root of */
+};
+
+short byte, count;						/* Used for bit io */
+short nodes;							/* Nodes so far */
+struct NODE table[CODES];				/* The big list! */
+
+char _prog_name[] = "LZW";
+char _version[] = "2.3";
+char _copyright[] = "(c) 1992 RJK";
+int _stack = 16000;
+
+int input_bit(FILE *);
+int input_code(FILE *);
+int pack(FILE *,FILE *);
+int unpack(FILE *,FILE *);
+void add_node(int, int);
+void output_bit(int, FILE *);
+void output_code(int, FILE *);
+void output_flush(FILE *);
+int output_string(int, FILE *);
+void setup_table(void);
+void usage(void);
+
+/*
+ * Entry point
+ */
+int main(int argc, char **argv)
+{
+	assert(sizeof (struct NODE) == 8);
+	if(argc != 2) {
+		usage();
+		return -15;
+	}
+	switch(argv[1][0]) {
+		case 'c': case 'C':
+			return pack(stdin,stdout);
+		case 'd': case 'D':
+			return unpack(stdin,stdout);
+		default:
+			usage();
+			return -15;
+	}
+}
+
+/*
+ * Tell user what to do
+ */
+void usage(void)
+{
+	fprintf(stderr,"Usage:-\n\n  LZW c|d <input >output\n\n");
+}
+
+/*
+ * Prepare the table
+ */ 
+void setup_table(void)
+{
+	int i;
+
+	for(i = 0; i < CHARS; ++i) {
+		table[i].character = table[i].first = i;
+		table[i].root = -1;
+		table[i].child = -1;
+		table[i].next = -1;
+	}
+	nodes = CHARS;
+}
+
+/*
+ * Pack a file
+ */
+int pack(in,out)
+FILE *in,*out;
+{
+	short code;
+	short K;
+	long length;
+
+	setup_table();
+	byte = 0;
+	count = 1;
+	while(EOF != fgetc(in))
+		;
+	if(ferror(in))
+		return -16;
+	length = ftell(in);
+	rewind(in);
+	fputc(length, out);
+	fputc(length >>= 8, out);
+	fputc(length >>= 8, out);
+	fputc(length >>= 8, out);
+	code = fgetc(in);
+#if EOF != -1
+	if(code == EOF)
+		code = -1;
+#endif
+	while(EOF != (K = getc(in))) {
+		short n;
+
+		n = table[code].child;
+		while(n != (short)-1 && table[n].character != K)
+			n = table[n].next;
+		if(n != (short)-1)
+			code = n;
+		else {
+			output_code(code, out);
+			if(nodes == CODES)
+				setup_table();
+			else
+				add_node(code, K);
+			code = K;
+		}
+	}
+	if(code != -1)
+		output_code(code, out);
+	output_flush(out);
+	return ferror(out) ? -16 : 0;
+}
+
+/*
+ * Create a new node if possible
+ *
+ */
+void add_node(int root, int character)
+{
+	struct NODE *n;
+
+	assert(nodes < CODES);
+
+	n = table + nodes;
+
+	n->child = -1;
+	n->next = table[root].child;
+	table[root].child = nodes;
+	n->root = root;
+	n->character = character;
+	n->first = table[root].first;
+	nodes++;
+}
+
+/*
+ * Output a code using the appropriate number of bits
+ */
+void output_code(int code, FILE *fp)
+{
+	short M = nodes - 1;
+
+	assert(code < CODES);
+
+	do {
+		output_bit(code & 1, fp);
+		code >>= 1;
+		M >>= 1;
+	} while(M != 0);
+}
+
+/*
+ * Output a single bit
+ */ 
+void output_bit(int bit, FILE *fp)
+{
+	if(bit)
+		byte += count;
+	count <<= 1;
+	if(count == CHARS) {
+		putc(byte, fp);
+		count = 1;
+		byte = 0;
+	}
+}
+
+/*
+ * Finish of bit output
+ */ 
+void output_flush(FILE *fp)
+{
+	if(count != 1) {
+		fputc(byte, fp);
+		byte = 0;
+		count = 1;
+	}
+}
+
+/*
+ * Unpack a file
+ */ 
+int unpack(in,out)
+FILE *in,*out;
+{
+	int i;
+	short code, old, K;
+	long length;
+
+	count = CHARS>>1;
+	length = 0;
+	for(i = 0; i < 32; i += 8)
+		length += fgetc(in)<<i;
+	while(length > 0) {
+		setup_table();
+		--nodes;
+		code = input_code(in);
+		++nodes;
+		length -= output_string(code, out);
+		while(length > 0 && nodes < CODES) {
+			old = code;
+			code = input_code(in);
+			if(code < nodes) {
+				length -= output_string(code, out);
+				K = table[code].first;
+			} else {
+				assert(code == nodes);
+				K = table[old].first;
+				length -= 1 + output_string(old, out);
+				fputc(K, out);
+			}
+			add_node(old, K);
+		}
+	}
+	assert(length == 0);
+	return ferror(in) || ferror(out) ? -16 : 0;
+}
+
+/*
+ * Read a code using the appropriate bit size
+ */
+int input_code(FILE *fp)
+{
+	int M; 
+	int C = 0;
+	int B = 1;
+
+	assert(nodes < CODES);
+
+	M = nodes;
+	do {
+		if(input_bit(fp))
+			C += B;
+		B += B;
+		M >>= 1;
+	} while(M != 0);
+	assert(C < CODES);
+	return C;
+}
+
+/*
+ * Read a bit
+ */
+int input_bit(FILE *fp)
+{
+	count += count;
+	if(count == CHARS) {
+		byte = getc(fp);
+		count = 1;
+	}
+	return byte & count ? 1 : 0;
+}
+
+/*
+ * Output the string for a code
+ * Return the number of characters written
+ */
+int output_string(int code, FILE *fp)
+{
+	int next;
+	int count;
+
+	if(-1 != (next = table[code].root))
+		count = output_string(next, fp);
+	else
+		count = 0;
+	putc(table[code].character, fp);
+	return count+1;
+}

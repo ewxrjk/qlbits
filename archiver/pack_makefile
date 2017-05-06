@@ -1,0 +1,29 @@
+#
+# Makefile compaction programs
+#
+# (c) 1992 Richard Kettlewell
+#
+
+cflags = -warn=6
+lflags = -bufp150K
+
+################################################################################
+
+lzw: lzw_o
+	$(ld) $(lflags) -olzw lzw_o
+
+lzw2: lzw2_o
+	$(ld) $(lflags) -olzw2 lzw2_o
+
+lzw3: lzw3_o
+	$(ld) $(lflags) -olzw3 lzw3_o
+
+lzw4: lzw4_o
+	$(ld) $(lflags) -olzw4 lzw4_o
+
+################################################################################
+
+huff: huff_o
+	$(ld) $(lflags) -ohuff huff_o
+
+################################################################################

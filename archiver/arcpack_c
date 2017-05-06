@@ -1,0 +1,150 @@
+/*
+ * Archiver packing and unpacking routines
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	<string.h>
+#include	<limits.h>
+#include	<assert.h>
+#include	"archive.h"
+
+/*
+ * Compact file by run supression
+ * Every multiple occurence of a single byte is replaced
+ * by a 'mark' byte, then the repeated byte, then a count
+ * The mark byte only ever appears as runs of itself,
+ * even when runs are only 1 long.
+ * Runs are output with 0 => run length 1, 1 => run length 2
+ * ...255 => run length 256
+ */
+struct TFILE *rlpacker(FILE *fp, long length, long *count, int distinct)
+{
+	unsigned char mark = 0;
+	long mcount = LONG_MAX;
+	short c,d;
+	short i;
+
+	btf = tfopen();
+	/*
+	 * Choose a mark byte
+	 */
+	for(i = 0; i < 256; ++i) {
+		if(count[i] <= mcount) {
+			mcount = count[i];
+			mark = i;
+		}
+	}
+
+	/*
+	 * Record the mark byte to the output file
+	 */
+	tfputc(mark, btf);
+
+	/*
+	 * Start compacting
+	 */
+	c = fgetc(fp);
+	d = fgetc(fp);
+	while(EOF != c) {
+		if(c == mark || c == d) {
+			unsigned char runchar = c, runlength = 0;
+
+			c = d;
+			d = fgetc(fp);
+			while(c == runchar && runlength < 255) {
+				++runlength;
+				c = d;
+				d = fgetc(fp);
+			}
+			if(runchar == mark || runlength > 2) {
+				tfputc(mark, btf);
+				tfputc(runchar, btf);
+				tfputc(runlength, btf);
+			} else do {
+				tfputc(runchar, btf);
+			} while(runlength-- != 0);
+		} else {
+			tfputc(c, btf);
+			c = d;
+			d = getc(fp);
+		}
+	}	
+	return btf;
+}
+
+/*
+ * Micropacking - a file with only one distinct byte is packed
+ * in a very simple way (but I'd look silly if my program couldn't
+ * pick up on things like this!)
+ */
+struct TFILE *micropack(FILE *fp, long length, long *count, int distinct)
+{
+	short i;
+
+	if(distinct != 1)
+		return 0;
+	btf = tfopen();
+	for(i = 0; i < 256; ++i)
+		if(count[i]) {
+			tfputc(i, btf);
+			return btf;
+		}
+	assert(0);
+}
+
+/*
+ * Unpack files which weren't packed in the first place
+ */
+void nounpack(long length, FILE *fp)
+{
+	short c;
+	while(length-- > 0) {
+		c = getc(arcfp);
+		crc_byte(c);
+		putc(c, fp);
+	}
+}
+
+/*
+ * Unpack micro-packed files
+ */
+void unmicropack(long length, FILE *fp)
+{
+	short c;
+	c = fgetc(arcfp);
+	while(length-- > 0) {
+		crc_byte(c);
+		putc(c, fp);
+	}
+}
+
+/*
+ * Unpack RL-packed files
+ */
+void unrlpacker(long length, FILE *fp)
+{
+	unsigned char mark;
+	short count;
+	short c;
+
+	mark = fgetc(arcfp);
+
+	while(length > 0) {
+		c = getc(arcfp);
+		if(c == mark) {
+			c = fgetc(arcfp);
+			count = fgetc(arcfp);
+			do {
+				crc_byte(c);
+				putc(c, fp);
+				--length;
+			} while(count--);
+		} else {
+			crc_byte(c);
+			putc(c, fp);
+			--length;
+		}
+	}
+}

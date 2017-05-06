@@ -1,0 +1,525 @@
+/*
+ * Archiver program
+ *
+ * (c) 1992 Richard Kettlewell
+ *
+ * Packs all files listed on command line into an archive in the
+ * standard output. Calculates CRCs, etc; assumes shell wildcard
+ * expansion, doesn't do any of its own.
+ *
+ * This software may be freely distributed and used provided that:-
+ *
+ *		-there is no commercial interest in distribution
+ *		-if any of the source is included, all of it is
+ *		-its use does not breach the copyright of anything else
+ *		-any modifications are clearly stated
+ *		-this message is not removed
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	<string.h>
+#include	<ctype.h>
+#include	<limits.h>
+#include	<assert.h>
+#include	"archive.h"
+
+char _prog_name[] = "Archiver";
+char _version[] = "1.0";
+
+#if QDOS
+#include	<qdos.h>
+
+char _copyright[] = " 1992 RJK";
+int _stack = 20000;
+
+void consetup_title();
+void (*_consetup)() = consetup_title;
+
+struct WINDOWDEF _condetails = {
+	2,1,0,7,
+	484,242,14,0
+};
+#endif
+
+/*
+ * Global variables
+ */
+unsigned char bit;						/* Bit to set when outputting bits */
+unsigned char byte;						/* Byte being built up */
+struct TFILE *btf;						/* Output temporary file */
+FILE *arcfp;							/* Archive file */
+char option_verbose;					/* Verbose mode? */
+
+#define MEMBERS(X) ((sizeof X) / (sizeof *X))
+
+/*
+ * Different ways of compacting things
+ */
+struct {
+	char useflag;
+	struct TFILE *(*packer)(FILE *, long, long *, int);
+	void (*unpacker)(long, FILE *);
+	char *description;
+} packlist[] = {
+	1, 0,				nounpack,		"No compaction",
+	1, micropack,		unmicropack,	"Micropacking",
+	1, rlpacker,		unrlpacker,		"Run length compression",
+	1, huffmanpack,		unhuffer,		"Huffman packing",
+	1, lzwpack,			unlzw,			"Lempel-Ziv packing"
+};
+
+#define PACKTYPES MEMBERS(packlist)
+
+/*
+ * Things that appear on the command line
+ */
+struct {
+	char selector;
+	char type;
+	void (*handler)(int, int, char **);
+	char *otype;
+	char *description;
+} options[] = {
+	'?', 0, option_help,		0,		"Information",
+	'C', 0, create_archive,		"w",	"Create archive",
+	'E', 0, extract_files,		"r",	"Extract file(s)",
+	'X', 0, extract_files,		"r",	"Extract file(s)",
+	'L', 0, list_files,			"r",	"List file(s)",
+	'V', 2, 0,					0,		"Verbose mode"
+};
+
+#define OPTIONS MEMBERS(options)
+
+#define OPT_VERBOSE	5
+
+int main(int argc, char **argv)
+{
+	short argno;
+	short action = 0;
+	char *p;
+
+	/*
+	 * Check sizes: these generate no code if there isn't any
+	 * problem, otherwise they will cause the program to stop
+	 * in its tracks.
+	 */
+	assert(sizeof(long) >= 4);
+	assert(sizeof(short) >= 2);
+
+	/*
+	 * Scan any options on the command line
+	 */
+	for(argno = 1; argno < argc && (p = argv[argno])[0] == '-'; ++argno) {
+		short c,i;
+		while(c = *++p) {
+			c = toupper(c);
+			for(i = 0; i < OPTIONS; ++i) {
+				if(options[i].selector == c)
+					break;
+			}
+			if(i != OPTIONS) {
+				if(options[i].type == 0)
+					action = i;
+				else
+					switch(i) {
+					case OPT_VERBOSE:
+						option_verbose = 1;
+						break;
+					}
+			} else {
+				printf("Unknown option '%s'\nUse -? for info\n", p);
+				return -15;
+			}
+		}
+	}
+
+	/*
+	 * Open an archive file for some options
+	 */
+	if(options[action].otype) {
+		if(argno >= argc) {
+			puts("No archive file specified");
+			return -15;
+		}
+		if(!(arcfp = fopen(p, options[action].otype))) {
+			printf("Can't open '%s'\n", p);
+			return -7;
+		}
+		++argno;
+	}
+
+	/*
+	 * Do everything
+	 */
+	(*options[action].handler)(argno, argc, argv);
+
+	fflush(stdout);
+
+	if(options[action].handler)
+		fclose(arcfp);
+
+	return 0;
+}
+
+void create_archive(int argno, int argc, char **argv)
+{
+	char *filename;
+
+	for(; argno < argc; ++argno) {
+		filename = ffirst(argv[argno]);
+		while(filename) {
+			pack_file(filename, arcfp);
+			filename = fnext();
+		}
+	}
+
+	if(ferror(arcfp))
+		puts("[Output error]");
+}
+
+/*
+ * Pack is to a specified file, not just arcfp
+ * This is for purposes of future expansion
+ */
+void pack_file(char *filename, FILE *output)
+{
+	FILE *fp;
+	long length;
+	long count[256];
+	struct TFILE *packed = 0;
+	long packlength;
+	short packtype;
+	short c;
+	short distinct;
+	short i;
+
+	if(!(fp = fopen(filename, "r"))) {
+		printf("[Cannot read '%s']\n", filename);
+		return;
+	}
+	printf("Analysing '%s'... ", filename);
+	fflush(stdout);
+	length = 0;
+	distinct = 0;
+	memset(count, 0, 256*sizeof (long));
+	crc_init();
+	while(EOF != (c = getc(fp))) {
+		++length;
+		if(!count[c]++)
+			++distinct;
+		crc_byte(c);
+	}
+	if(ferror(fp) || length == 0) {
+		if(length)
+			puts("\n[File error - skipping file]");
+		else
+			puts("\n[Zero length - skipping file]");
+		fclose(fp);
+		return;
+	}
+	packlength = length;
+	packtype = 0;
+	packed = 0;
+	for(i = 1; i < PACKTYPES; ++i) {
+		struct TFILE *c_file;
+
+		rewind(fp);
+
+		/*
+		 * The useflag field allows use to prevent
+		 * some methods of compaction from being used at all.
+		 * This means that we can upgrade various types of
+		 * compaction routine to superior versions and ignore
+		 * attempts to compact with the old sort, but still
+		 * keep all information regarding decompaction.
+		 *
+		 * The packing functions return 0 if they work out that they
+		 * cannot work on the data provided before they open a temporary
+		 * file.
+		 */
+		if(packlist[i].useflag && (c_file = (*packlist[i].packer)(fp, length, count, distinct))) {
+			if(c_file->length < packlength) {
+				if(packed)
+					tfdelete(packed);
+				packed = c_file;
+				packlength = packed->length;
+				packtype = i;
+			} else
+				tfdelete(c_file);
+		}
+	}
+	if(option_verbose) {
+		printf("[%s] ", packlist[packtype].description);
+		fflush(stdout);
+	}
+	/*
+	 * Write a header
+	 *
+	 *	4 bytes			"RJK%" watermark
+	 *	1 byte			Length of filename
+	 *	n bytes			Filename
+	 *	1 byte			Pack type (0 for none)
+	 *	4 bytes			Unpacked length
+	 *	4 bytes			Packed length
+	 *	2 bytes			CRC of unpacked file
+	 *	2 bytes			16 bit count of extended header bytes
+	 *	m bytes			Extended header
+	 *	=======
+	 *	18+n+m bytes	Size of header
+	 */
+	assert(strlen(filename) <= 255);
+	assert(packtype <= 255);
+	fputs("RJK%", output);
+	fputc((int)strlen(filename), output);
+	fputs(filename, output);
+	fputc(packtype, output);
+	putlong(length, output);
+	putlong(packlength, output);
+	putword(crc_total(), output);
+	putword(0, output);
+	if(packtype == 0) {
+		rewind(fp);
+		while(EOF != (c = getc(fp)))
+			putc(c, output);
+	} else {
+		struct TBLOCK *tb;
+
+		tb = packed->first;
+		while(tb) {
+			size_t bytes = TFBLOCK - tb->free;
+			if(bytes)
+				fwrite(tb->data, (size_t)1, bytes, output);
+			tb = tb->next;
+		}
+	}
+	if(ferror(fp))
+		puts("\n[Input error]");
+	else
+		puts("Done");
+	if(ferror(output)) {
+		puts("[Output error]");
+		clearerr(output);
+	}
+	fflush(stdout);
+	fclose(fp);
+}
+
+void extract_files(int argno, int argc, char **argv)
+{
+	FILE *fp;
+	char watermark[4];
+	char filename[256];				/* Maximum length + \0 */
+	short packtype;
+	long length;
+	long c_length;
+	unsigned short crc;
+	short c;
+	short xhdr;
+
+	/*
+	 * Read headers until we run out of file
+	 */
+	while(4 == fread(watermark, (size_t)1, (size_t)4, arcfp)) {
+		if(strncmp(watermark, "RJK%", (size_t)4))
+			break;					/* Wrong watermark */
+		c = fgetc(arcfp);
+		if(c != fread(filename, (size_t)1, (size_t)c, arcfp))
+			break;
+		filename[c] = 0;			/* Terminate filename */
+		packtype = fgetc(arcfp);
+		length = getlong(arcfp);
+		c_length = getlong(arcfp);
+		crc = getword(arcfp);
+		xhdr = getword(arcfp);
+		for(c = xhdr; c; --c)
+			getc(arcfp);
+
+		if(ferror(arcfp))
+			break;
+
+		/*
+		 * If argno >= argc then no files/patterns for
+		 * extraction were specified SO extract the lot
+		 */
+		if(argno >= argc || matchname(filename, argno, argc, argv)) {
+			if(packtype >= PACKTYPES) {
+				printf("[Pack type %d unknown]\n", packtype);
+				goto skip_file;		/* Yuk */
+			}
+
+			if(!(fp = fopen(filename, "w"))) {
+				printf("[Cannot write '%s']\n", filename);
+				goto skip_file;		/* Yuk */
+			}
+			printf("Unpacking '%s'... ", filename);
+			fflush(stdout);
+			crc_init();
+			(*packlist[packtype].unpacker)(length, fp);
+			if(feof(arcfp))
+				fputs("[Unexpected EOF] ", stdout);
+			if(crc != (unsigned short)crc_total())
+				fputs("[Incorrect CRC] ", stdout);
+			if(ferror(fp))
+				puts("[Output error]");
+			else
+				puts("OK");
+			fclose(fp);
+		} else {
+skip_file:
+			while(c_length--)
+				getc(arcfp);
+		}
+		fflush(stdout);
+	}
+
+	if(ferror(arcfp))
+		puts("[Input error]");
+	else if(!feof(arcfp))
+		puts("[Not an archive file]");
+}
+
+void list_files(int argno, int argc, char **argv)
+{
+	char watermark[4];
+	char filename[256];
+	short packtype;
+	long length;
+	long c_length;
+	unsigned short crc;
+	short c;
+	short xhdr;
+
+	long total = 0, c_total = 0;
+	int files = 0;
+
+	if(option_verbose) {
+		puts("Filename            Length    Packed    Save CRC  Type");
+		puts("=================== ========= ========= ==== ==== =============================");
+	} else {
+		puts("Filename            Length");
+		puts("=================== =========");
+	}
+
+	/*
+	 * Read headers until we run out of file
+	 */
+	while(4 == fread(watermark, (size_t)1, (size_t)4, arcfp)) {
+		if(strncmp(watermark, "RJK%", (size_t)4))
+			break;
+		c = fgetc(arcfp);
+		if(c != fread(filename, (size_t)1, (size_t)c, arcfp))
+			break;
+		filename[c] = 0;
+		packtype = fgetc(arcfp);
+		length = getlong(arcfp);
+		c_length = getlong(arcfp);
+		crc = getword(arcfp);
+		xhdr = getword(arcfp);
+		for(c = xhdr; c; --c)
+			getc(arcfp);
+
+		if(ferror(arcfp))
+			break;
+
+		/*
+		 * If no pattern(s) specified, list all files
+		 */
+		if(argno >= argc || matchname(filename, argno, argc, argv)) {
+			printf("%-19s %9ld", filename, length);
+			if(option_verbose) {
+				printf(" %9ld %3d%% %04X ", c_length, (int)((length - c_length)*100/length), (int)crc);
+				if(packtype < PACKTYPES)
+					fputs(packlist[packtype].description, stdout);
+				else
+					printf("[unknown %d]", (int)packtype);
+			}
+			fputc('\n', stdout);
+			++files;
+			total += length;
+			c_total += c_length + 18 + xhdr + strlen(filename);
+		}
+
+		while(c_length--)
+			getc(arcfp);
+
+		fflush(stdout);
+	}
+
+	if(ferror(arcfp))
+		puts("[Input error]");
+	else if(!feof(arcfp))
+		puts("[Not an archive file]");
+	else if(option_verbose && total) {
+		puts("\n=================== ========= ========= ====");
+		printf("%5d files         %9ld %9ld %3d%%\n", files, total, c_total, (int)((total - c_total)*100/total));
+	}
+}
+
+/*
+ * Service routines
+ */
+
+/*
+ * Allocate memory. Terminate on error.
+ */
+void *alloc(size_t s)
+{
+	void *p;
+
+	if(!(p = malloc(s))) {
+		puts("\n[Out of memory]");
+		exit(-3);
+	}
+	return p;
+}
+
+#if 0
+/*
+ * Write the character map: a true bit is output for
+ * every character with non-zero count and a translate
+ * table is built mapping every such character onto
+ * a number between 0 and the number of distinct characters
+ * minus one.
+ */
+void construct_charmap(long *count, unsigned char *translate)
+{
+	short i = 0,j;
+
+	for(j = 0; j < 256; ++j) {
+		if(count[j]) {
+			translate[j] = i++;
+			bit_write(1);
+		} else
+			bit_write(0);
+	}
+}
+
+/*
+ * Read a character map from the input and build a reverse
+ * translation table for it
+ */
+int collect_charmap(unsigned char *translate)
+{
+	short i = 0, j;
+
+	for(j = 0; j < 256; ++j) {
+		if(bit_read())
+			translate[i++] = j;
+	}
+	return i;
+}
+#endif
+
+void option_help(int argno, int argc, char **argv)
+{
+	short i;
+
+	printf("%s v%s[%d] (c) 1992 Richard Kettlewell\n\n", _prog_name, _version, PACKTYPES);
+	puts("\tArchive option archive_filename {filespec}\n");
+	for(i = 0; i < OPTIONS; ++i)
+		printf("\t-%c\t%s\n", options[i].selector, options[i].description);
+	puts("\nFor more info:-\n");
+	puts("\tRichard Kettlewell <rjk@greenend.org.uk>");
+	exit(0);
+}
+

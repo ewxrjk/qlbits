@@ -1,0 +1,68 @@
+/*
+ * Archiver string matching routines
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#if QDOS
+#include	<qdos.h>
+#endif
+#include	<string.h>
+#include	<stdio.h>
+#include	"archive.h"
+
+#if QDOS
+#define MATCHFN(NAME, PATTERN) fnmatch((NAME), (PATTERN))
+static struct DIR_LIST *dlist,*dnext;
+#endif
+
+/*
+ * Return first filename matching a given pattern
+ * If no filenames match, just return pattern string
+ */
+char *ffirst(char *pattern)
+{
+#if QDOS
+	int ecode;
+
+	if(dlist)
+		qdir_delete(dlist);
+	dlist = qdir_read(pattern, "", 0, &ecode);
+	if(!dlist)
+		return pattern;
+	dnext = dlist;
+	return fnext();
+#endif
+}
+
+/*
+ * Return the next matching filename, or 0
+ */
+char *fnext(void)
+{
+#if QDOS
+	struct DIR_LIST *d;
+
+	if(d = dnext) {
+		dnext = d->dl_next;
+		return d->dl_cname;
+	}
+	if(dlist) {
+		qdir_delete(dlist);
+		dlist = 0;
+	}
+	return 0;
+#endif
+}
+		
+/*
+ * Matching names against the contents of the command line
+ * (...or any similarly structured list of names...)
+ */
+int matchname(char *name, int argno, int argc, char **argv)
+{
+	for(; argno < argc; ++argno) {
+		if(MATCHFN(name, argv[argno]))
+			return 1;
+	}
+	return 0;
+}

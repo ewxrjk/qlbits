@@ -1,0 +1,188 @@
+/*
+ * Archiver LZW packing
+ *
+ * (c) 1992 Richard Kettlewell
+ *
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	"archive.h"
+
+#define MAXBITS			12
+
+#define CODES			(1<<MAXBITS)
+
+struct NODE {
+	unsigned char character;
+	unsigned char first;
+	short root;
+	short next;
+	short child;
+};
+
+static short nodes;
+static struct NODE *table;
+
+static void add_node(int, int);
+static void output_code(int);
+static void setup_table(void);
+static int input_code(void);
+static int output_string(int, FILE *);
+
+struct TFILE *lzwpack(FILE *fp, long length, long *count, int distinct)
+{
+	short code;
+	short K;
+
+	btf = tfopen();
+	bit_init();
+
+	table = alloc(CODES * sizeof(struct NODE));
+
+	setup_table();
+
+	code = fgetc(fp);
+#if EOF != -1
+	if(code == EOF)
+		code = -1;
+#endif
+	while(EOF != (K = getc(fp))) {
+		short n;
+
+		n = table[code].child;
+		while(n != (short)-1 && table[n].character != K)
+			n = table[n].next;
+		if(n != (short)-1)
+			code = n;
+		else {
+			output_code(code);
+			if(nodes == CODES)
+				setup_table();
+			else
+				add_node(code, K);
+			code = K;
+		}
+	}
+
+	if(code != -1)
+		output_code(code);
+	bit_flush();
+
+	free(table);
+
+	return btf;
+}
+
+static void setup_table(void)
+{
+	short i;
+
+	for(i = 0; i < 256; ++i) {
+		table[i].character = table[i].first = i;
+		table[i].root = -1;
+		table[i].child = -1;
+		table[i].next = -1;
+	}
+	nodes = 256;
+}
+
+static void add_node(int root, int character)
+{
+	struct NODE *n;
+
+	n = table + nodes;
+
+	n->child = -1;
+	n->next = table[root].child;
+	table[root].child = nodes;
+	n->root = root;
+	n->character = character;
+	n->first = table[root].first;
+	nodes++;
+}
+
+static void output_code(int code)
+{
+	short M = nodes - 1;
+
+	do {
+		bit_write(code & 1);
+		code >>= 1;
+		M >>= 1;
+	} while(M != 0);
+}
+
+/*
+ * Unpack a file
+ */ 
+void unlzw(long length, FILE *fp)
+{
+	short code, old, K;
+
+	table = alloc(CODES * sizeof(struct NODE));
+
+	bit_input_init();
+
+	while(length > 0) {
+		setup_table();
+		--nodes;
+		code = input_code();
+		++nodes;
+		length -= output_string(code, fp);
+		while(length > 0 && nodes < CODES) {
+			old = code;
+			code = input_code();
+			if(code < nodes) {
+				length -= output_string(code, fp);
+				K = table[code].first;
+			} else {
+				K = table[old].first;
+				length -= 1 + output_string(old, fp);
+				crc_byte(K);
+				fputc(K, fp);
+			}
+			add_node(old, K);
+		}
+	}
+
+	free(table);
+}
+
+/*
+ * Read a code using the appropriate bit size
+ */
+static int input_code(void)
+{
+	int M; 
+	int C = 0;
+	int B = 1;
+
+	M = nodes;
+	do {
+		if(bit_read())
+			C += B;
+		B += B;
+		M >>= 1;
+	} while(M != 0);
+	return C;
+}
+
+/*
+ * Output the string for a code
+ * Return the number of characters written
+ */
+int output_string(int code, FILE *fp)
+{
+	int next;
+	int count;
+	short c;
+
+	if(-1 != (next = table[code].root))
+		count = output_string(next, fp);
+	else
+		count = 0;
+	crc_byte(c = table[code].character);
+	putc(c, fp);
+	return count+1;
+}
+

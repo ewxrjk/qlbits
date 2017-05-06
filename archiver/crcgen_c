@@ -1,0 +1,39 @@
+/*
+ * Make CRC table
+ *
+ * (c) 1992 Richard Kettlewell
+ *
+ * Algorithm from Personal Computer World March 1991.
+ */
+#include	<stdio.h>
+
+#define MAGIC	0x1021;
+
+int main(int argc, char **argv)
+{
+	unsigned short data;
+	unsigned short acc;
+	unsigned short temp;
+	int i;
+	int j;
+
+	fputs("unsigned short crctable[256]={", stdout);
+	for(i = 0; i < 256; ++i) {
+		data = i << 8;
+		acc = 0;
+		for(j = 8; j; --j) {
+			temp = data ^ acc;
+			data += data;
+			acc += acc;
+			if(temp & 0x8000)
+				acc ^= MAGIC;
+		}
+		if((i & 7) == 0)
+			fputs("\n\t",stdout);
+		else
+			fputc(' ', stdout);
+		printf("%u,", acc);
+	}
+	fputs("\n};\n", stdout);
+	return ferror(stdout) ? -16 : 0;
+}

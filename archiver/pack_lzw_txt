@@ -1,0 +1,332 @@
+                              LZW Packing
+                              ===========
+
+                         By Richard Kettlewell
+
+								3/9/1992
+								5/9/1992
+
+	This  document contains a description of the LZW data compaction
+algorithm,    one  frequently  used  in  archive  programs.  It  may  be
+distributed  freely  provided  it is accompanied by the following source
+files, and that there is no commercial interest:-
+
+	lzw_c
+	lzw2_c
+	lzw3_c
+	lzw4_c
+
+	The  basic  idea  of  Lempel-Ziv  packing  is  that sequences of
+characters  within the file to be packed are likely to crop up more than
+once.  Instead,  however,  of looking for sequences, building a table of
+them  and  then  compacting on that basis, the LZW algorithm builds up a
+temporary  table  of  sequences  as  it  compacts,  effectively defining
+sequences  by  writing  them  in  a  less compacted form than they later
+appear.
+
+	The  algorithms  given  here  in psuedo-code is designed to work
+with  variable  bit size input/output codes. What is required is a table
+of  codes,  of a size which is a power of 2 (for convenient variable-bit
+output):  4096 is a frequent choice. An "even" power of 2 - i.e. a power
+of 4 - is probably a good idea, but probably isn't essential.
+
+	Each node has the following fields:-
+
+		char		Character at end of string
+		first		Character at start of string
+		root		Previous string or -1
+
+	Extra  fields  may be introduced for purposes of hashing so that
+nodes may be found more rapidly. The first 256 elements of the table are
+initialised as follows:-
+
+		table[x].char = x		(0 <= x <= 255)
+		table[x].first = x
+		table[x].root = -1
+
+	It  is  quite reasonable to mess around with reducing the number
+of  table  entries initialised if there is some previous knowledge about
+which  characters are in the input file. A count variable is also set to
+the number of nodes so far defined.
+
+	Everything    above  here  is  common  to  both  compaction  and
+decompaction.
+
+		nodes <- 256
+
+                               Compaction
+
+	The packing algorithm is as follow:-
+
+		code <- -1
+
+		K = first character of input
+		WHILE K is not end of file DO
+		    IF code = -1 THEN
+			code <- K
+		    ELSE
+			IF x < nodes exists such that
+			    table[x].root = code
+			    AND table[x].char = K
+			THEN
+			    code <- x
+			ELSE
+			    Output code
+			    IF nodes < maximum_nodes THEN
+				table[nodes].root = code
+				table[nodes].char = K
+				table[nodes].first = table[code].first
+				Set appropriate link fields
+				    (see below)
+				nodes <- nodes + 1
+			    END	IF
+			    code <- K
+			END IF
+		    END IF
+		    K <- next character of input
+		END WHILE
+
+		Finished
+
+	When  a code is output, the number of bits to be used is exactly
+enough  to  accomodate the value nodes-1 without any leading zeroes. The
+following table gives an idea:-
+
+		Value of nodes		Bits
+
+		256			8
+		257			9
+		258			9
+		...
+		511			9
+		512			9
+		513			10
+		...
+		4095			12
+		4096			12
+		...
+
+	The  search for the node x may be speeded by use of some form of
+hashing, as in lzw_c and lzw2_c.
+
+	This could also be done by every node x having a pointer to some
+node  x1  which  had  table[x1].root = x, and also every node x having a
+pointer  to  some  node  y such that table[x].root = table[y].root. This
+essentially forms a linked list of possible extensions of each code, and
+is done in lzw3_c.
+
+	So the structure of a node would then be:-
+
+		char		Character at end of string
+		first		Character at start of string
+		root		Previous string or -1
+		next		Next root sharer or -1
+		child		Root user or -1
+
+	If  the character and first fields are 8 bits long and the root,
+next  and child fields all signed 16 bit table indices, this gives up to
+65535  table  entries  (a long way more than enough) and an 8 byte table
+entry,  allowing  rapid indexing since only a shift is needed as opposed
+to a full multiplication.
+
+                              Decompaction
+
+	The decompaction algorithm can use the same initialised table as
+the  compaction routine, initialised in the same way, but not all of the
+fields will be used - no long searches are required.
+
+	The original version of my code had a variable 'inmax' which was
+used  to  keep  track  of  the maximum inputtable code; a little thought
+shows that this is not in fact necessary.
+
+	Additionally,  the  decompact  routine must know the size of the
+output file so that it may terminate correctly: no EOF code is necessary
+and  any  serious archive program will store this length anyway, so that
+it may demonstrate how wonderful it is at compacting things...
+
+		code <- first code from input
+		Output string corresponding to code
+		WHILE the output is not yet complete DO
+		    old <- code
+		    code <- next code from input
+		    IF code < nodes [i.e. code is in table] THEN
+			Output string corresponding to code
+			K <- table[code].first
+		    ELSE
+		    	K <- table[old].first
+			Output string corresponding to old
+			Output character K
+		    END IF
+		    table[nodes].root = old
+		    table[nodes].char = K
+		    table[nodes].first = table[old].first
+		    nodes <- nodes + 1
+		END WHILE
+
+	When  inputting a code, the number of bits used is that which is
+sufficient to represent the value of the variable nodes, with no leading
+zeroes,  UNLESS  nothing  has been input yet in which case the number of
+bits  is  sufficient  to  represent  the  maximum character code with no
+leading zeroes; this is equal to nodes-1.
+
+	Be  very careful though - when nodes is at its maximum value, it
+will  be  1  more  than is correct for the above. The strategy I used to
+find  the  maximum  inputtable code is to have a boolean variable iflag,
+which  is  initialised  to false. The code for deciding the maximum M is
+then:-
+
+		M <- nodes
+		IF M >= CODES or iflag = false THEN
+		    Decrement M
+		    iflag <- true
+		END IF
+
+	The  ordering  of  conditions  reflects  the  fact that "iflag =
+false"  will  be  true  once, whereas on a non-trivial file "M >= CODES"
+will  be  true  very  frequently.  CODES is the number of entries in the
+table, including the initialised ones.
+
+	To  output  the  string  corresponding  to a code, the following
+algorithm may be used:
+
+		IF code <> -1 THEN
+		    Output string corresponding to table[code].root
+		    Output character table[code].char
+		    Decrement incomplete length of output file
+		END IF
+
+	The  decrement  instruction is necessary for the WHILE condition
+to work properly.
+
+                                Examples
+
+	Several  files  are provided as examples. The lzw_c program uses
+variable  bit  sizes,  but  needs  the variable inmax. It also has a bug
+relating to long files in input_code (cf lzw2_c.)
+
+	lzw2_c does away with the need for inmax.
+
+	Both  of lzw_c and lzw2_c use a hash table to speed searches for
+nodes.  lzw3_c  is  based on lzw2_c but uses the method advanced in this
+document for speeding searches.
+
+	lzw4_c  contains  the code for handling table resets. The output
+of lzw4_c is NOT compatible with that of any of the earlier code!
+
+                              Table Reset
+
+	While the algorithm described above is fine for short files, the
+table can become full quite rapidly when compacting large file (i.e. the
+type of file we most want to compact!)
+
+	While  this  isn't  a  problem if the file contains many repeats
+after  the  point  at  which  the  table  becomes  full, most files vary
+considerably  throughout.  So,  some  method  of  resetting the table is
+required.
+
+	The  best  way of doing this is quite simply to reset it when it
+becomes full. The reset routine simply re-initialises the table:-
+
+		FOR 0 <= x <= 255 DO
+		    table[x].character = x
+		    table[x].first = x
+		    table[x].root = -1
+		    table[x].child = -1
+		    table[x].next = -1
+		END FOR x
+		nodes <- 256
+
+	For convenience, I have also separated out the code for adding a
+new node:-
+
+		table[nodes].child = -1
+		table[nodes].next = table[root].child
+		table[root].child = nodes;
+		table[nodes].root = root
+		table[nodes].char = K
+		table[nods].first = table[root].first
+		nodes <- nodes + 1
+
+	The compaction algorithm is then:-
+
+		("Re-") initialise table
+		code <- first character of input
+		K <- next character from input
+		WHILE K is not end of file DO
+		    n <- table[code].child
+		    WHILE n <> -1 and table[n].character <> K DO
+			n <- table[n].next
+		    END WHILE
+		    IF n <> -1 THEN
+		        code <- n
+		    ELSE
+			Send code to output
+			IF nodes = Number of possible codes THEN
+			    Re-initialise table
+			ELSE
+			    Create node with root=code and K=K
+			END IF
+			code <- K
+		    END IF	
+		    K <- next character from input
+		END WHILE
+		IF code <> -1 THEN
+		    Send code to output
+		END IF
+
+	The  decompaction  routine is more generalised than the original
+one.
+
+		Find length of expected output
+		WHILE output incomplete DO
+		    (Re-)initialise table
+		    nodes <- nodes - 1
+		    code <- next code from input
+		    nodes <- nodes + 1
+		    Output string corresponding to code
+		    WHILE output incomplete and nodes < number of codes DO
+		        old <- code
+			code <- next code from input
+			IF code < nodes THEN
+			    Output string corresponding to code
+			    K <- table[code].first
+			ELSE
+			    (Now, code = nodes)
+			    K <- table[old].first
+			    Output string corresponding to old
+			    Output character K
+			END IF
+			Create node with root = old and K = K
+		    END WHILE
+		END WHILE
+
+                       Problems and Optimisations
+
+	There  are  a number of potential pitfalls when implementing LZW
+compaction  and  decompaction  routines. When writing what is now lzw_c,
+for  example,  I forgot to initialise the table for compaction. In fact,
+they  way  I  had written it meant that this was not a problem in either
+lzw_c  or  lzw2_c - but caused serious hassle for lzw3_c! (Hence all the
+DEBUG stuff...)
+
+	My  code  uses  the  same  routines for handling tables for both
+compaction  and  decompaction.  However,  the decompaction routines only
+require  the 'first', 'root' and 'char' fields of each node and so could
+have  4 byte nodes; despite adding extra code, this would save memory to
+the  tune  of 4*4096 = 16Kb; but since the array is statically allocated
+in my code, the space saved still gets tied up.
+
+	Since  the  routine  to  output  a  string  when decompacting is
+recursive, make sure that your program has plenty of stack space!
+
+	If you are using C68, then you may need to increase the linker's
+program  buffer.  Adding  -bufp150K is sufficient; you can get away with
+less but I can't be bothered to find an exact limit. Failure to set this
+on early versions of the linker can lead to a crash.
+
+                               The Author
+
+	Any feedback or questions can be directed to:-
+
+		Richard Kettlewell
+		rjk@greenend.org.uk

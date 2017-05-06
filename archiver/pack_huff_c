@@ -1,0 +1,414 @@
+/*
+ * Huffman packing
+ *
+ * (c) 1992 Richard Kettlewell
+ *
+ * See huff_txt.
+ */
+#define		NDEBUG
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	<limits.h>
+
+#ifndef NDEBUG
+#define DEBUG(x) x
+#define MSG(x) fputs(x, stderr);
+#else
+#define DEBUG(x)
+#define MSG(x)
+#endif
+
+#define new(p) (p = alloc(sizeof *p))
+
+#define setbit(b, bitno) ((b).bits[(bitno)>>3] |= (1<<((bitno)&7)))
+#define clrbit(b, bitno) ((b).bits[(bitno)>>3] &= ~(1<<((bitno)&7)))
+#define getbit(b, bitno) ((b).bits[(bitno)>>3] & (1<<((bitno)&7))) 
+
+char _prog_name[] = "Huff";
+char _version[] = "1.0";
+char _copyright[] = "(c) 1992 RJK";
+int _stack = 16000;						/* Recursion in use - can't be too careful */
+
+struct NODE {
+	int character;						/* Character or -1 for internal node */
+	long frequency;						/* Weight */
+	struct NODE *left;					/* Subtrees */
+	struct NODE *right;
+};
+
+struct BITSTRING {
+	unsigned char length;				/* Length of this bitstring */
+	unsigned char bits[32];				/* Bits of bitstring */
+};
+
+int pack(FILE *, FILE *);
+int readbit(FILE *);
+int unpack(FILE *, FILE *);
+struct NODE *readtree(FILE *);
+unsigned long count_bits(struct NODE *);
+void *alloc(size_t);
+void assign_bitstrings(struct NODE *, struct BITSTRING *, FILE *);
+void flushbit(FILE *);
+void free_nodes(struct NODE *);
+void usage(void);
+void writebit(long, FILE *);
+DEBUG(void dump_table(int,struct NODE *);)
+
+struct BITSTRING bitstrings[256];
+int out_bit = 1, out_char = 0;
+int in_char, in_count = 0;
+
+/*
+ * Decide whether to compact or decompact 
+ */
+int main(int argc, char **argv)
+{
+	if(argc != 2) {
+		usage();
+		return -15;
+	}
+	switch(argv[1][0]) {
+		case 'c': case 'C':
+			return pack(stdin,stdout);
+		case 'd': case 'D':
+			return unpack(stdin,stdout);
+		default:
+			usage();
+			return -15;
+	}
+}
+
+/**********************************************************************/
+
+/*
+ * Compact a file
+ */
+int pack(FILE *in, FILE *out)
+{
+	struct NODE *n, *nodes[256];
+	unsigned long frequency[256];
+	unsigned long length, min1, min2, lb;
+	int c,i,j,k,i1,i2;
+	int count;
+	struct BITSTRING b;
+
+	/* Start by finding frequency of each character and length of whole file */
+	for(i = 0; i < 256; ++i) 
+		frequency[i] = 0;
+	while(EOF != (c = getc(in)))
+		++frequency[c];
+	if(ferror(in)) {
+		fputs("Input error\n");
+		return -16;
+	}
+	length = ftell(in);
+
+	DEBUG(fprintf(stderr,"Length=%lu\n", length);)
+	MSG("Collected frequencies\n")
+
+	DEBUG(
+		for(i = 0; i < 256; ++i) {
+			if(isprint(i))
+				fprintf(stderr, "'%c': %lu\n", i, frequency[i]);
+			else
+				fprintf(stderr, " %02X: %lu\n", i, frequency[i]);
+		}
+	)
+
+	rewind(in);
+
+	/* Create initial table of nodes */
+	count = 0;
+	for(i = 0; i < 256; ++i) if(frequency[i] != 0) {
+		nodes[count++] = new(n);
+		n->character = i;
+		n->frequency = frequency[i];
+		n->left = n->right = 0;
+	} /* end for i */
+
+	if(count <= 1) {
+		fputs("That's a bloody silly file to pack.\n", stderr);
+		for(i = 0; i < count; ++i)
+			free(nodes[i]);
+		return -15;
+	}
+
+	MSG("Created table\n")
+	
+	/* There is now a table of count <= 256 nodes */
+	/* ...so now we can make the tree */
+	while(count > 1) {
+		DEBUG(fprintf(stderr,"count=%d\n", count);)
+		/* Start with very large minima */
+		min1 = min2 = ULONG_MAX;
+		/* Look for too least frequency entries */
+		for(i = 0; i < count; ++i) if(nodes[i] != 0) {
+			if(nodes[i]->frequency < min2) {
+				if(nodes[i]->frequency < min1) {
+					/* New least frequent */
+					/* Use < not <= to make count != i2 happen more often */
+					min2 = min1;
+					min1 = nodes[i]->frequency;
+					i2 = i1;
+					i1 = i;
+				} else {
+					/* New second least frequent */
+					min2 = nodes[i]->frequency;
+					i2 = i;
+				} /* end if */
+			} /* end if */
+		} /* end if / end for i */
+		/* Create a new node replacing the two old ones */
+		new(n);
+		n->character = -1;
+		n->frequency = nodes[i1]->frequency + nodes[i2]->frequency;
+		n->left = nodes[i1];
+		n->right = nodes[i2];
+		nodes[i1] = n;
+		/* Less nodes in the table now */
+		--count;
+		if(count != i2)
+			nodes[i2] = nodes[count];
+	} /* end while */ 
+
+	MSG("Built table\n\n");
+	DEBUG(dump_table(0,nodes[0]);)
+	MSG("\n");
+
+	/* nodes[0] is the root now */
+	/* Output the file length */
+	for(lb = 1<<31; lb; lb >>= 1)
+		writebit(length & lb, out);
+
+	MSG("Output length\n")
+
+	/* We must assign some bit strings */
+	/* Output a description of the table at the same time */
+	b.length = 0;
+	assign_bitstrings(nodes[0], &b, out);
+
+	MSG("Assigned bitstrings\n")
+
+	/* Now the file itself must be compacted */
+	while(EOF != (c = getc(in))) {
+		j = bitstrings[c].length;
+		for(k = 0; k < j; ++k)
+			writebit(getbit(bitstrings[c],k), out);
+	}
+	/* Don't forget to output the last byte */
+	flushbit(out);
+
+	MSG("Compacted file\n")
+
+	/* Release memory */
+	free_nodes(nodes[0]);
+
+	return ferror(out) ? -16 : 0;
+}
+
+/*
+ * A two-job function.
+ *
+ * Firstly, bitstrings are assigned to all characters. Secondly,
+ * a concise description of the tree is output in bit form.
+ *
+ * The description of a tree consists of a single bit for the root node
+ * which is 0 for internal and 1 for external followed by (for internal
+ * nodes) the descriptions of the left and right subtrees or (for
+ * external nodes) the 8 bit character code at the node.
+ *
+ * This is read by the decompaction routine and turned back into a tree.
+ *
+ * The alternative method is to write the bit pattern for each character
+ * in turn, preceding each bit with a zero, or a one for no more bits for
+ * this character. A bit of algebra and a pair of graphs suggest that
+ * my method is more efficient, but I would hesitate to state this as
+ * a certainty.
+ */
+void assign_bitstrings(struct NODE *n, struct BITSTRING *b, FILE *out)
+{
+	int c;
+	if((c = n->character) == -1) {
+		writebit(0, out);
+		clrbit(*b, b->length);
+		++b->length;
+		assign_bitstrings(n->left, b, out);
+		setbit(*b, b->length-1);
+		assign_bitstrings(n->right, b, out);
+		--b->length;
+	} else {
+		int i,j;
+
+		writebit(1, out);
+		for(j = 1<<7; j; j >>= 1)
+			writebit(c & j, out);
+		bitstrings[c] = *b;
+	}
+}
+
+/*
+ * Unpack a file which was packed as above
+ * Much simpler!
+ */
+int unpack(FILE *in,FILE *out)
+{
+	int c;
+	int i,j,k;
+	unsigned long length = 0;
+	unsigned long lb;
+	struct NODE *root,*n;
+
+	if(EOF == (c = getc(in)))
+		return 0;						/* Empty file */
+	ungetc(c, in);
+
+	/* Read the file length */
+	for(lb = 1<<31; lb; lb >>= 1) {
+		if(readbit(in))
+			length += lb;
+	}
+
+	/* Read the tree */
+	root = readtree(in);
+
+	MSG("Read tree\n\n")
+	DEBUG(dump_table(0, root);)
+	MSG("\n")
+
+	/* Now decompact - this is easy */
+	n = root;
+	while(length) {
+		if(readbit(in))
+			n = n->right;
+		else
+			n = n->left;
+		if(n->character != -1) {
+			putc(n->character, out);
+			--length;
+			n = root;
+		}
+	}
+
+	/* Release memory */
+	free_nodes(root);
+
+	return ferror(in) ? -16 : 0;
+}
+
+/*
+ * Recursively read a tree as described above
+ */
+struct NODE *readtree(FILE *fp)
+{
+	struct NODE *n;
+	int j, c = 0;
+
+	new(n);
+	DEBUG(n->frequency = 0;)
+	if(readbit(fp)) {
+		n->left = n->right = 0;
+		for(j = 1<<7; j; j >>= 1) {
+			if(readbit(fp))
+				c += j;
+		}
+		n->character = c;
+	} else {
+		n->left = readtree(fp);
+		n->right = readtree(fp);
+		n->character = -1;
+	}
+	return n;
+}
+
+/*
+ * Program usage
+ */
+void usage(void)
+{
+	fprintf(stderr,"Usage:-\n\n    HUFF c|d <input >output\n\n");
+}
+
+/*
+ * Allocate memory. Terminate on error.
+ */
+void *alloc(size_t s)
+{
+	void *p;
+
+	if(!(p = malloc(s))) {
+		fputs("Out of memory\n", stderr);
+		exit(-3);
+	}
+	return p;
+}
+
+/*
+ * Write one bit to a file
+ */
+void writebit(long bit, FILE *fp)
+{
+	if(bit)
+		out_char += out_bit;
+	if((out_bit += out_bit) == 256) {
+		putc(out_char, fp);
+		out_bit = 1;
+		out_char = 0;
+	}
+}
+
+/*
+ * Tidy up a byte on output
+ */
+void flushbit(FILE *fp)
+{
+	while(out_bit != 1)
+		writebit(0, fp);
+}
+
+/*
+ * Read one bit from a file
+ */
+int readbit(FILE *fp)
+{
+	int b;
+
+	if(in_count-- == 0) {
+		in_count = 7;
+		in_char = getc(fp);
+	}
+	b = in_char & 1;
+	in_char >>= 1;
+	return b;
+}
+
+/*
+ * Release memory occupied by a subtree
+ */
+void free_nodes(struct NODE *n)
+{
+	if(n) {
+		free_nodes(n->left);
+		free_nodes(n->right);
+		free(n);
+	}
+}
+
+DEBUG(
+	/*
+	 * Display the tree
+	 * Not very readable, but you can visually (but slowly!) or automatically
+	 * compare the compact and decompact trees for bug tracing
+	 * (though the frequencies in a decompact tree are all 0.)
+	 */
+	void dump_table(int offset, struct NODE *n)
+	{
+		int i;
+		if(n) {
+			for(i = 0; i < offset; ++i)
+				fputc(' ', stderr);
+			fprintf(stderr,"%d : %lu\n", n->character, n->frequency);
+			dump_table(offset+1, n->left);
+			dump_table(offset+1, n->right);
+		}
+	}
+)

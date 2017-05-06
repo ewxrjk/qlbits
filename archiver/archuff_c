@@ -1,0 +1,184 @@
+/*
+ * Archiver Huffman packing
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	<limits.h>
+#include	"archive.h"
+
+#define setbit(b, bitno) ((b).bits[(bitno)>>3] |= (1<<((bitno)&7)))
+#define clrbit(b, bitno) ((b).bits[(bitno)>>3] &= ~(1<<((bitno)&7)))
+#define getbit(b, bitno) ((b).bits[(bitno)>>3] & (1<<((bitno)&7))) 
+
+struct NODE {
+	short character;
+	long weight;
+	struct NODE *left;
+	struct NODE *right;
+};
+
+struct BITSTRING {
+	unsigned short length;				/* Length of this bitstring */
+	unsigned char bits[32];				/* Bits of bitstring */
+};
+
+static void assign_bitstrings(struct NODE *, struct BITSTRING *);
+static void free_nodes(struct NODE *);
+static struct NODE *readtree(void);
+
+static struct BITSTRING *bitstrings;
+
+struct TFILE *huffmanpack(FILE *fp, long length, long *count, int distinct)
+{
+	struct NODE *n, *nodes[256];
+	long min1, min2;
+	short c,i,j,k,i1,i2;
+	short nodecount;
+	struct BITSTRING b;
+
+	nodecount = 0;
+	for(i = 0; i < 256; ++i) if(count[i] != 0) {
+		nodes[nodecount++] = new(n);
+		n->character = i;
+		n->weight = count[i];
+		n->left = n->right = 0;
+	}
+
+	if(nodecount <= 1) {
+		for(i = 0; i < nodecount; ++i)
+			free(nodes[i]);
+		return 0;
+	}
+
+	while(nodecount > 1) {
+		min1 = min2 = LONG_MAX;
+		for(i = 0; i < nodecount; ++i) if(nodes[i] != 0) {
+			if(nodes[i]->weight < min2) {
+				if(nodes[i]->weight < min1) {
+					min2 = min1;
+					min1 = nodes[i]->weight;
+					i2 = i1;
+					i1 = i;
+				} else {
+					min2 = nodes[i]->weight;
+					i2 = i;
+				}
+			} 
+		}
+		new(n);
+		n->character = -1;
+		n->weight = nodes[i1]->weight + nodes[i2]->weight;
+		n->left = nodes[i1];
+		n->right = nodes[i2];
+		nodes[i1] = n;
+		--nodecount;
+		if(nodecount != i2)
+			nodes[i2] = nodes[nodecount];
+	}
+
+	btf = tfopen();
+	bit_init();
+
+	bitstrings = alloc(256 * sizeof(struct BITSTRING));
+
+	b.length = 0;
+	assign_bitstrings(nodes[0], &b);
+
+	while(EOF != (c = getc(fp))) {
+		j = bitstrings[c].length;
+		for(k = 0; k < j; ++k)
+			bit_write(getbit(bitstrings[c],k));
+	}
+
+	bit_flush();
+
+	free_nodes(nodes[0]);
+	free(bitstrings);
+
+	return btf;
+}
+
+static void assign_bitstrings(struct NODE *n, struct BITSTRING *b)
+{
+	short c;
+
+	if((c = n->character) == -1) {
+		bit_write(0);
+		clrbit(*b, b->length);
+		++b->length;
+		assign_bitstrings(n->left, b);
+		setbit(*b, b->length-1);
+		assign_bitstrings(n->right, b);
+		--b->length;
+	} else {
+		unsigned char j;
+
+		bit_write(1);
+		for(j = 0x80; j; j >>= 1)
+			bit_write(c & j);
+		bitstrings[c] = *b;
+	}
+}
+
+static void free_nodes(struct NODE *n)
+{
+	if(n) {
+		free_nodes(n->left);
+		free_nodes(n->right);
+		free(n);
+	}
+}
+
+/*
+ * Unpack a huffman packed file
+ */
+void unhuffer(long length, FILE *fp)
+{
+	struct NODE *root,*n;
+
+	bit_input_init();
+
+	root = readtree();
+
+	n = root;
+	while(length) {
+		if(bit_read())
+			n = n->right;
+		else
+			n = n->left;
+		if(n->character != -1) {
+			short c;
+
+			crc_byte(c = n->character);
+			putc(c, fp);
+			--length;
+			n = root;
+		}
+	}
+
+	free_nodes(root);
+}
+
+static struct NODE *readtree(void)
+{
+	struct NODE *n;
+	int j, c = 0;
+
+	new(n);
+	if(bit_read()) {
+		n->left = n->right = 0;
+		for(j = 0x80; j; j >>= 1) {
+			if(bit_read())
+				c += j;
+		}
+		n->character = c;
+	} else {
+		n->left = readtree();
+		n->right = readtree();
+		n->character = -1;
+	}
+	return n;
+}
+

@@ -1,0 +1,118 @@
+                            Huffman's Method
+                            ================
+
+	For  a  more  general  treatment  of  some  of the ideas in this
+document,  see  chapter 2 of Donald Knuth's "Fundamental Algorithms." In
+particular,  section 2.3 deals with trees in general and section 2.3.4.5
+deals with Huffman's method.
+
+1. Binary Trees
+
+	Knuth  defines  a binary tree as "a finite set of nodes which is
+either empty, or consists of a root and two disjoint binary trees called
+the left and right subtrees of the root."
+
+	Less formally, a binary tree may be empty (i.e. no nodes), or it
+may  have  a  root.  Every node may have 'attached' to it a left subtree
+and/or a right subtree, or neither.
+
+	For example,
+
+				<Root>
+				   |
+				   |
+			+----------+------------+
+			|			|
+			|			|
+		     <Node1>		     <Node2>
+
+	is  a  small  binary  tree  consisting  of  a root node with two
+subtrees;  each of these consists of a single node with no subtrees (or,
+following Knuth's definition more strictly, with two empty subtrees.)
+
+2. Extended Binary Trees
+
+	An  extended binary tree has the property that if one subtree of
+a given node is empty, so is the other: so every node always has an even
+number of non-empty subtrees.
+
+	A  node  with  two  empty subtrees is called an external node; a
+node with two non-empty subtrees is called an internal node.
+
+	In  this  situation, the path of left/right branches required to
+get  from the root - usually an internal node, but it doesn't have to be
+-  to  a  given  external node can be represented as a list of 1s and 0s
+(say, 1 to go left and 0 to go right; or vica versa.)
+
+	We could use Ls and Rs, but computers like 0s and 1s better.
+
+3. Weighting and Path Length
+
+	Suppose  each  external  node has a number attached to it called
+its  'weight.' Each external node also has a path length - the length of
+the string of 0s and 1s required to get to it from the root.
+
+	If  we  multiply  each external nodes weight by its path length,
+and  add up over all the external nodes, we get the weighted path length
+of the tree.
+
+	The point of Huffman's method is that, given a set of nodes with
+weights,  one can find a particular tree which has the smallest possible
+weighted path length for that set of nodes and weights.
+
+4. File Compaction
+
+	If each node represents a character and its weight the number of
+times  it occurs in the file to be compacted, Huffman's method allows us
+to  construct  a  tree  which represents the smallest possible compacted
+file  if  the  compacted  file  is  made  up of the binary paths for the
+characters of the input file.
+
+5. Huffman's Method
+
+	Huffman's  method  is extremely simple. If w1 and w2 are the two
+lowest  weights,  and the other weights are w3, w4, ... wm then we solve
+the  same  problem for the set of weights w1+w2, w3, w4, ... wm and then
+replace the node corresponding to w1+w2 with
+
+				+
+				|
+				|
+			+---------------+
+			|		|
+			w1		w2
+
+	When   there  is  only  one  member  of  the  set,  with  weight
+w1+w2+...+wm,  the  problem is trivial. Knuth provides a proof that this
+procedure actually gives the minimum weighted path length.
+
+6. Table Storage
+
+	The  only  slight problem is that a description of the tree must
+be  passed  between  the compaction and decompaction routines; there are
+two ways of doing this.
+
+	One is to output the code for every single character, along with
+a  length  indicator,  or  a  stop  bit (the stop bit method doubles the
+number of bits required and the other adds 8*256=2048 bits.)
+
+	The other is to describe the tree itself, for example outputting
+a  1  or  0  for  internal  or external nodes, followed by (for internal
+nodes)  the descriptions of the left and right subtrees or (for external
+nodes) the character code at this node.
+
+	The    character    frequencies  are  not  of  interest  to  the
+decompaction routine.
+
+	For further details, see the huff_c source.
+
+7. The Author
+
+	This document was written by:-
+
+		Richard Kettlewell
+		rjk@greenend.org.uk
+
+	I  would  be interested in any feedback that anyone has relating
+to this.
+

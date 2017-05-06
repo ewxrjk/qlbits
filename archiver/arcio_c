@@ -1,0 +1,157 @@
+/*
+ * Handle temporary "files" in memory
+ * Write single bits to these psuedo-files
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	"archive.h"
+
+static void tfnewblock(struct TFILE *tf);
+
+void tfdelete(struct TFILE *tf)
+{
+	struct TBLOCK *tb,*tb1;
+
+	tb = tf->first;
+	while(tb1 = tb) {
+		tb = tb->next;
+		free(tb1);
+	}
+	free(tf);
+}
+
+struct TFILE *tfopen(void)
+{
+	struct TFILE *tf;
+
+	new(tf);
+	tf->length = 0;
+	tf->first = 0;
+	tf->current = 0;
+	tfnewblock(tf);
+	return tf;
+}
+
+void tfputc(int c, struct TFILE *tf)
+{
+	if(!tf->current->free)
+		tfnewblock(tf);
+	*tf->current->ptr++ = c;
+	--tf->current->free;
+	++tf->length;
+}
+
+void tfnewblock(struct TFILE *tf)
+{
+	struct TBLOCK *tb,**tbp;
+
+	if(!tf->current)
+		tbp = &tf->first;
+	else
+		tbp = &tf->current->next;
+	tb = alloc(TFBLOCK + sizeof(struct TBLOCK));
+	*tbp = tb;
+	tf->current = tb;
+	tb->next = 0;
+	tb->free = TFBLOCK;
+	tb->ptr = tb->data;
+}
+
+/*
+ * Bit io routines
+ */
+
+void bit_init(void)
+{
+	bit = 0x80;
+	byte = 0;
+}
+
+void bit_write(int b)
+{
+	if(b)
+		byte |= bit;
+	if(!(bit >>= 1)) {
+		tfputc(byte, btf);
+		bit = 0x80;
+		byte = 0;
+	}
+}
+
+void bit_flush(void)
+{
+	while(bit != 0x80)
+		bit_write(0);
+}
+
+/*
+ * 16 and 32 bit ("word" and "long") IO routines
+ * More portable than using putw() and getw(), since these can't be
+ * guaranteed to (a) exist for all systems or (b) use the same byte
+ * order every time.
+ *
+ * I imagine there would be major portability problems trying to stick
+ * some of this (+++the bit IO stuff!) onto a machine the underlying
+ * architecture of which was decimal, not binary. But how many can
+ * you name of those?
+ */
+
+void putlong(long l, FILE *fp)
+{
+	short i;
+
+	for(i = 0; i < 32; i += 8)
+		fputc((int)(l >> i), fp);
+}
+
+long getlong(FILE *fp)
+{
+	short i;
+	long l = 0;
+
+	for(i = 0; i < 32; i += 8)
+		l += fgetc(fp) << i;
+	return l;
+}
+
+void putword(int w, FILE *fp)
+{
+	fputc(w, fp);
+	fputc(w >> 8, fp);
+}
+
+/*
+ * Separate statements in here to ensure order of process doesn't get
+ * fucked by smart-ass compilers
+ */
+int getword(FILE *fp)
+{
+	int w;
+
+	w = fgetc(fp);
+	w |= fgetc(fp) << 8;
+	return w;
+}
+
+/*
+ * Bit input routines
+ */
+
+void bit_input_init(void)
+{
+	bit = 0;
+}
+
+int bit_read(void)
+{
+	int rt;
+	if(!bit) {
+		bit = 0x80;
+		byte = getc(arcfp);
+	}
+	rt = byte & bit;
+	bit >>= 1;
+	return rt;
+}

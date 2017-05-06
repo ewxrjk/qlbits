@@ -1,0 +1,69 @@
+/*
+ * Archiver program general header
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+
+#define TFBLOCK		4096				/* Size of 1 block in a temporary file */
+
+struct TFILE {
+	long length;						/* Length of temporary file */
+	struct TBLOCK *first;				/* First temporary block or 0 */
+	struct TBLOCK *current;				/* Current temporary block or 0 */
+};
+
+struct TBLOCK {
+	struct TBLOCK *next;				/* Next block */ 
+	long free;							/* Bytes free */
+	unsigned char *ptr;					/* Next free byte */
+	unsigned char data[1];				/* Start of data */
+};
+
+void tfdelete(struct TFILE *);
+struct TFILE *tfopen(void);
+void tfputc(int, struct TFILE *);		/* Write a character to a temporary file */
+void bit_init(void);
+void bit_write(int);
+void bit_flush(void);
+void putlong(long, FILE *);
+long getlong(FILE *);
+void putword(int, FILE *);
+int getword(FILE *);
+void bit_input_init();
+int bit_read();
+
+void crc_init(void);
+void crc_byte(int);
+int crc_total(void);
+
+char *ffirst(char *);
+char *fnext(void);
+int matchname(char *, int, int, char **);
+
+void create_archive(int, int, char **);
+void extract_files(int, int, char **);
+void list_files(int, int, char **);
+void option_help(int, int, char **);
+void pack_file(char *, FILE *);
+void *alloc(size_t);
+
+void construct_charmap(long *, unsigned char *);
+int collect_charmap(unsigned char *);
+
+#define new(p) (p = alloc(sizeof *p))
+
+struct TFILE *rlpacker(FILE *, long, long *, int);
+struct TFILE *huffmanpack(FILE *, long, long *, int);
+struct TFILE *lzwpack(FILE *, long, long *, int);
+struct TFILE *micropack(FILE *, long, long *, int);
+
+void nounpack(long, FILE *);
+void unmicropack(long, FILE *);
+void unrlpacker(long, FILE *);
+void unhuffer(long, FILE *);
+void unlzw(long, FILE *);
+
+extern struct TFILE *btf;
+extern unsigned char bit;
+extern unsigned char byte;
+extern FILE *arcfp;
