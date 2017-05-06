@@ -1,0 +1,270 @@
+/*
+ * Cellular automata
+ *
+ * (c) 1992 Richard Kettlewell
+ */
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	<string.h>
+#include	<qdos.h>
+
+/******************************************************************************/
+
+#define	CYCLIC		1					/* Griffeath's Cyclic space [MOORE/VN] */
+#define	LIFE		0					/* Conway's Life [MOORE] */
+#define	FREDKIN		0					/* Fredkin automaton [VN] */
+
+/******************************************************************************/
+
+#define	MOORE		1					/* Neighbourhood definition (0 => VN) */
+										/* Not all automata check this symbol */
+#define	SIZE		128					/* Size of array [a power of 2] */
+
+/******************************************************************************/
+
+#if		CYCLIC
+#define	STATES		8
+#ifndef MOORE
+#define MOORE		0
+#endif
+#ifndef VN
+#define VN			0
+#endif
+#endif
+
+#if		LIFE || FREDKIN
+#undef	MOORE
+#undef	VN
+#define	STATES		2
+#endif
+
+#if		LIFE
+#define	MOORE		1
+#define VN			0
+#endif
+
+#if		FREDKIN
+#define MOORE		0
+#define VN			1
+#endif
+
+#if		MOORE + VN != 1
+error, set exactly one neighbourhood only
+#endif
+
+#define	HEIGHT		SIZE
+#define	WIDTH		(SIZE*2)
+#define	INDEX(x,y)	((x) * SIZE + (y))
+#define	POSN(x,y)	((x) + (256-SIZE)/2),((y) + (256-SIZE)/2)
+#define SMASK		(SIZE-1)
+
+#if		STATES == 2
+#define	CTRANS(c)	(7*(c))
+#else
+#define	CTRANS(c)	(c)
+#endif
+
+#define	DOWN(X,Y)	old[INDEX((X),((Y)+1)&SMASK)]
+#define	UP(X,Y)		old[INDEX((X),((Y)-1)&SMASK)]
+#define	RIGHT(X,Y)	old[INDEX(((X)+1)&SMASK,(Y))]
+#define	LEFT(X,Y)	old[INDEX(((X)-1)&SMASK,(Y))]
+#define	DRIGHT(X,Y)	old[INDEX(((X)+1)&SMASK,((Y)+1)&SMASK)]
+#define	DLEFT(X,Y)	old[INDEX(((X)-1)&SMASK,((Y)+1)&SMASK)]
+#define	URIGHT(X,Y)	old[INDEX(((X)+1)&SMASK,((Y)-1)&SMASK)]
+#define	ULEFT(X,Y)	old[INDEX(((X)-1)&SMASK,((Y)-1)&SMASK)]
+
+unsigned int rnd();
+void plot8();
+
+extern char *_SYS_VAR;
+short fs[] = {512,256,0,0};
+char _prog_name[] = "CA 1.0";
+char *_endmsg = NULL;
+unsigned long seed;
+
+int main()
+{
+	char md,tv;
+	long id;
+	int i;
+	register short j,k;
+	short p,q;
+	unsigned char c;
+	unsigned char *old,*new;
+#if		CYCLIC || LIFE
+	register unsigned char e;
+#endif
+
+	if(!(old = malloc(SIZE*SIZE)))
+		exit(-3);
+	if(!(new = malloc(SIZE*SIZE)))
+		exit(-3);
+	memset(old, 0, SIZE*SIZE);
+	memset(new, 0, SIZE*SIZE);
+	id = fgetchid(stdout);
+	sd_wdef(id,-1,0,0,fs);				/* Set window position */
+	md = 8;
+	tv = -1;
+	mt_dmode(&md,&tv);
+#if SIZE != 256
+	sd_setpa(id,-1,3);
+	sd_clear(id,-1);
+#endif
+	seed = *(unsigned short *)(_SYS_VAR + 0x2e);
+	i = 0;
+	for(j = 0; j < SIZE; ++j) {
+		for(k = 0; k < SIZE; ++k) {
+			plot8(POSN(j,k), CTRANS(old[i] = new[i] = 0));
+			++i;
+		}
+	}
+	j = k = 0;
+	plot8(POSN(j,k),7 ^ CTRANS(new[INDEX(j,k)]));
+	io_fbyte(id,-1,&c);
+	plot8(POSN(j,k),CTRANS(new[INDEX(j,k)]));
+	while(c != '\n' && c != 27) {
+		switch(c) {
+			case 194:
+				--j;
+			case 192:
+				if(--j < 0)
+					j += SIZE;
+				break;
+
+			case 202:
+				++j;
+			case 200:
+				if(++j >= SIZE)
+					j -= SIZE;
+				break;
+
+			case 210:
+				--k;
+			case 208:
+				if(--k < 0)
+					k += SIZE;
+				break;
+
+			case 218:
+				++k;
+			case 216:
+				if(++k >= SIZE)
+					k -= SIZE;
+				break;
+
+#if		STATES == 2
+			case ' ':
+				old[INDEX(j,k)] = new[INDEX(j,k)] = !new[INDEX(j,k)];
+				break;
+#endif
+
+#if		STATES == 8
+			case '0':
+			case '1':
+			case '2':
+			case '3':
+			case '4':
+			case '5':
+			case '6':
+			case '7':
+				old[INDEX(j,k)] = new[INDEX(j,k)] = c - '0';
+				break;
+#endif
+
+			case 'r': case 'R':
+				i = 0;
+				for(p = 0; p < SIZE; p++) {
+					for(q = 0; q < SIZE; q++) {
+						plot8(POSN(p,q), CTRANS(old[i] = new[i] = rnd() % STATES));
+						++i;
+					}
+				}
+				break;
+
+			case 'c': case 'C':
+				i = 0;
+				for(p = 0; p < SIZE; p++) {
+					for(q = 0; q < SIZE; q++) {
+						plot8(POSN(p,q), CTRANS(old[i] = new[i] = 0));
+						++i;
+					}
+				}
+				break;
+		}
+		plot8(POSN(j,k),7 ^ CTRANS(new[INDEX(j,k)]));
+		io_fbyte(id,-1,&c);
+		plot8(POSN(j,k),CTRANS(new[INDEX(j,k)]));
+	}
+	if(c == 27) {
+		free(new);
+		free(old);
+		exit(0);
+	}
+	for(;;) {
+		if(!io_fbyte(id,0,&c)) {
+			if(c == 27) {				/* ESCape aborts */
+				free(new);
+				free(old);
+				exit(0);
+			} else if(c == 237) {		/* ^F2 forces complete redraw */
+				for(i = 0; i < SIZE*SIZE; ++i)
+					old[i] = !new[i];
+			} else
+				io_fbyte(id,-1,&c);		/* Any other key pauses */
+		}
+		i = 0;							/* Redraw grid */
+		for(j = 0;j < SIZE;j++) {
+			for(k = 0;k < SIZE; k++) {
+				if(new[i] != old[i])
+					plot8(POSN(j,k),CTRANS(old[i] = new[i]));
+				i++;
+			}
+		}
+		i = 0;							/* Re-build grid */
+		for(j = 0;j < SIZE;j++) {
+			for(k = 0;k < SIZE;k++) {
+#if		CYCLIC
+				e = (1+old[i])%STATES;
+				if(UP(j,k) == e
+					|| DOWN(j,k) == e
+					|| LEFT(j,k) == e
+					|| RIGHT(j,k) == e
+					|| (MOORE && (DRIGHT(j,k) == e
+							   || DLEFT(j,k) == e
+							   || URIGHT(j,k) == e
+							   || ULEFT(j,k) == e))) {
+					new[i] = e;
+				}
+#endif	/* CYCLIC */
+#if		LIFE
+				e = DOWN(j,k)
+					+ UP(j,k)
+					+ LEFT(j,k)
+					+ RIGHT(j,k)
+					+ DRIGHT(j,k)
+					+ DLEFT(j,k)
+					+ URIGHT(j,k)
+					+ ULEFT(j,k)
+				;
+				if(old[i])
+					new[i] = (e == 2) || (e == 3);
+				else
+					new[i] = (e == 3);
+#endif	/* LIFE */
+#if		FREDKIN
+				new[i] = DOWN(j,k) ^ UP(j,k) ^ LEFT(j,k) ^ RIGHT(j,k);
+#endif
+				i++;
+			}
+		}
+	}
+}
+
+/*
+ * Pseudo random number generator from K&R2
+ */
+unsigned int rnd()
+{
+	seed = seed * 1103515245 + 12345;
+	return seed >> 16;
+}

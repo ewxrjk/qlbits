@@ -1,0 +1,98 @@
+*	Dirty plot routines for C68 programs
+*	(c) 1992 Richard Kettlewell
+
+	.text
+	.globl	plot4,plot8,_plot4,_plot8
+*
+*	void plot8(int x, int y, int c);
+*
+*	           8(a6)  12(a6) 16(a6)
+*
+*	0 <= x <= 255
+*	0 <= y <= 255
+*	0 <= c <= 7
+*
+*	Screen is assumed to be at $20000.
+*
+plot8:
+_plot8:
+	link	a6,#0
+	movem.w	d3/d4,-(a7)
+	move.w	10(a6),d0		; Get x
+	move.w	14(a6),d1		; Get y
+	lsl.w	#7,d1
+	move.l	#$20000,a0
+	add.w	d1,a0			; Find start of screen line
+	move.w	d0,d1
+	lsr.w	#1,d1
+	and.w	#$7e,d1
+	add.w	d1,a0			; A0 = address
+	add.w	d0,d0			; Pixels -> bits
+	and.w	#7,d0			; D0 = shift right from top
+	eor.w	#6,d0			; D0 = shift left from bottom
+	moveq	#$fffffffc,d1		; Building mask
+	rol.b	d0,d1			; Shift mask into place
+	move.b	(a0),d2			; Get green byte from screen
+	and.b	d1,d2			; Mask it off
+	move.w	18(a6),d3		; Get colour
+	move.w	d3,d4			; Preserve red and blue bits
+	lsr.w	#1,d3			; Get green bit into generic place
+	and.w	#2,d3			; Lose rest of colour word
+	lsl.w	d0,d3			; Move green bit into specific place
+	or.b	d3,d2			; Add in green bit
+	move.b	d2,(a0)+		; Set screen
+	and.b	(a0),d1			; Get rb byte and mask it
+	and.w	#3,d4			; Get rb bits
+	lsl.w	d0,d4			; Move them into place
+	or.b	d4,d1			; Set bits
+	move.b	d1,(a0)			; Put back into screen
+	movem.w	(a7)+,d3/d4
+	unlk	a6
+	rts
+
+*
+*	void plot4(int x, int y, int c)
+*	           8(a6)  12(a6) 16(a6)
+*
+*	0 <= x <= 511
+*	0 <= y <= 255
+*	0 <= c <= 7
+*
+*	Screen is assumed to start at $20000
+*
+
+plot4:
+_plot4:
+	link	a6,#0
+	movem.w	d3/d4,-(a7)
+	move.w	10(a6),d0		; Get x
+	move.w	14(a6),d1		; Get y
+	lsl.w	#7,d1
+	move.l	#$20000,a0
+	add.w	d1,a0			; Start of line
+	move.w	d0,d1
+	lsr.w	#2,d1
+	and.w	#$7e,d1
+	add.w	d1,a0			; Screen address
+	and.w	#7,d0
+	eor.w	#7,d0			; Shift left
+	moveq	#$fffffffe,d1
+	rol.b	d0,d1			; Mask
+	move.b	(a0),d2
+	and.b	d1,d2			; Lose old green bit
+	move.w	18(a6),d3
+	move.w	d3,d4
+	lsr.w	#2,d3
+	and.w	#1,d3
+	lsl.w	d0,d3			; Position green bit
+	or.b	d3,d2
+	move.b	d2,(a0)+		; Reset screen
+	and.b	(a0),d1
+	lsr.w	#1,d4
+	and.w	#1,d4
+	lsl.w	d0,d4			; Position red bit
+	or.b	d4,d1
+	move.b	d1,(a0)			; Reset screen
+	movem.w	(a7)+,d3/d4
+	unlk	a6
+	rts
