@@ -1,0 +1,65 @@
+/*
+ * Linker
+ *
+ * (c) 1993 Richard Kettlewell
+ */ 
+#include	<stdio.h>
+
+#define I_MODULE 0						/* Input is a (sequence of) module(s) */
+#define I_LIBRARY 1						/* Input is a library */
+#define I_RTM 2							/* Input is a RTM description */
+
+typedef struct Module Module;
+typedef struct Relsym Relsym;
+typedef struct Section Section;
+typedef struct Subsection Subsection;
+typedef struct Symbol Symbol;
+typedef struct Term Term;
+typedef struct Xref Xref;
+typedef unsigned char Byte;
+
+#include "types.h"
+#include "machine.h"
+
+extern FILE *msfile;
+extern Module *modules;
+extern Relsym *xrelsyms;
+extern Section *sections;
+extern Symbol *symbols[HASHES];
+extern char Yflag;
+extern char Zflag;
+extern char alwaysrel;
+extern char caseind;
+extern char dottrans;
+extern char falsecommon;
+extern char map;
+extern char reltab;
+extern char sym;
+extern char verbose;
+extern char xflag;
+extern char yflag;
+extern char zflag;
+extern int maxsecnamelen;
+extern int maxsymnamelen;
+extern int relocations;
+extern int rounding;
+extern long common_start;
+extern long commonsize;
+extern long externals;
+extern long programsize;
+extern long relsize;
+extern long stacksize;
+extern long symcount;
+extern long undefined;
+
+Section *findsection(char *);
+Symbol *symbol(char *, int);
+int big_map(FILE *);
+int little_map(FILE *);
+int load_contents(char *, FILE *, int);
+int resolve_xrefs(void);
+int symbol_table(FILE *);
+int write_program(FILE *);
+int write_reltab(FILE *);
+void *safe_malloc(size_t);
+void hash_stats(void);

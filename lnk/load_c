@@ -1,0 +1,1149 @@
+/*
+ * Linker --- load a file
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+/*#define NDEBUG*/
+#include	"lnk.h"
+#include	<string.h>
+#include	<stdlib.h>
+#include	<stddef.h>
+#include	<ctype.h>
+#include	<assert.h>
+
+#ifdef DEBUG
+#define verbose 1
+#endif
+
+/* configuration for this module: */
+#define UNIX_IO				1			/* Use read() not fread()? [load.c] */
+#define MAXSYM				128			/* Size of local symbol buffer [load.c] */
+/* You can have more than 128 symbols per module! Do not worry! */
+
+#if UNIX_IO
+int read(int, void *, size_t);
+long lseek(int, long, int);
+#endif
+
+static void skip(int);
+static void getstr(char [], int);
+static int nextbyte(void);
+static long fileposition(void);
+static Byte *getname(char [], Byte *);
+static int load_rtm(void);
+static int load_mods(int);
+static int load_mod(int);
+static int scan_mod(int);
+
+#if FASTEST
+# if INPUT_BIGENDIAN
+#  define GETID(r,p) (void)(((r) = *(p)++), ((r) = (short)(((r) << 8) + *(p)++)))
+#  define GETLONG(r,p) (void)(((r) = *(p)++), ((r) = ((r) << 8) | *(p)++), \
+	((r) = ((r) << 8) | *(p)++), ((r) = ((r) << 8) | *(p)++))
+# else
+#  define GETID(r,p) (void)(((r) = *(p)++), ((r) = (short)((r) + (*(p)++ << 8))))
+#  define GETLONG(r,p) (void)(((r) = *(p)++), ((r) |= *(p)++ << 8), \
+	((r) |= *(p)++ << 16), ((r) |= *(p)++ << 24))
+# endif
+# define SKIP(x) (remain >= (x) ? (void)(remain -= (x), bufptr += (x)) : skip((x)))
+#else
+# define GETID(r,p) (void)(((r) = getid((p))), (p) += 2)
+# define GETLONG(r,p) (void)(((r) = getlong((p))), (p) += 4)
+# define SKIP(x) skip(x)
+static long getlong(Byte *);
+static int getid(Byte *);
+#endif
+
+#if FASTEST
+#define NEXTBYTE() (remain-- > 0 ? *bufptr++ : nextbyte())
+#else
+#define NEXTBYTE() nextbyte()
+#endif
+
+static char nambuf[NAMELENGTH+1];
+static Byte *input_buffer;
+static Byte *baseptr;
+static Byte *bufptr;
+static long bufsize;
+static long remain;
+static FILE *infp;
+static char errorflag;
+static char eofflag;
+static char *inname;
+static short maxndef, maxpdef;
+static int xrefs, terms;
+static Module *mod_buf;
+static int mod_remain;
+static Symbol *local_syms[MAXSYM];
+
+/*
+ * Load or scan a file as appropriate.
+ * The type is as given in lnk.h
+ */
+int load_contents(char *name, FILE *fp, int type)
+{
+	infp = fp;
+	inname = name;
+	if(type == I_RTM)
+		return load_rtm();
+	else {
+		baseptr = bufptr = input_buffer;
+		errorflag = 0;
+		eofflag = 0;
+		remain = 0;
+#if 1 /*#ifdef DEBUG */
+		if(load_mods(type == I_MODULE)) {
+			fprintf(stderr, "******** %s failed\n", name);
+			return 1;
+		} else
+			return 0;
+#else
+		return load_mods(type == I_MODULE);
+#endif
+	}
+}
+
+/*
+ * Scan a rtm definition and mark symbols as external
+ * as appropriate
+ */
+static int load_rtm(void)
+{
+	int l, result = 0;
+	/*
+	 * Run time module definition is a list of length-preceded names
+	 * --- a 0 byte or and EOF terminates
+	 *
+	 * This type of file will usually have been created with the aid
+	 * of the -x option, which outputs section RTMFILE to a file.
+	 * (The reason why EOF is not the only terminator is that
+	 * section RTMFILE may have junk appended to round its
+	 * length up.)
+	 */
+	while((l = getc(infp)) != EOF && l != 0) {
+		if(l > NAMELENGTH) {
+			fputs("RTM name ", stderr);
+			while(l--)
+				fputc(getc(infp), stderr);
+			fprintf(stderr, " too long [rtm=%s]\n", inname);
+			result = 1;
+		} else {
+			char buffer[NAMELENGTH+1];
+			int i = 0;
+			Symbol *sp;
+
+			while(l--)
+				buffer[i++] = getc(infp);
+			buffer[i] = 0;
+			if((sp = symbol(buffer, 0)) && sp->undefined) {
+				sp->module = NULL;
+				sp->undefined = 0;
+				undefined--;
+				sp->external = 1;
+				externals++;
+			}
+		}
+	}
+	return result;
+}
+
+/*
+ * Scan and load an ordinary module or library
+ * In fact, scan a sequence of modules which may or may not get
+ * included: in a library, inclusion is conditional, otherwise
+ * it is certain.
+ */
+static int load_mods(int i_init)
+{
+	int c;
+
+	while((c = nextbyte()) == 0xFB) {
+		if(nextbyte() != 0x01) {
+			fputs("Magic number missing\n", stderr);
+			goto format_error;
+		}
+		if(c = load_mod(i_init))
+			if(c > 0)
+				return 1;
+			else
+				goto format_error;
+#ifdef DEBUG
+		fputs("----------------------------------------------------------------\n", stderr);
+#endif
+	}
+	if(c != EOF || errorflag) {
+format_error:
+		if(errorflag)
+			fprintf(stderr, "Error reading file %s\n", inname);
+		else if(eofflag)
+			fprintf(stderr, "Unexpected end-of-file in %s\n", inname);
+		else
+			fprintf(stderr, "Format error in %s at %ld\n", inname, fileposition()-1);
+		return 1;
+	}
+	return 0;
+}
+
+static int scan_mod(int i_init)
+{
+	char buffer[256];
+	int included = i_init;
+	char *bp;
+	char oflag = 0, sflag = 0;
+	int c;
+
+	getstr(buffer, nextbyte());
+	/*
+	 * Find the banner, if there is one
+	 */
+	if(bp = strchr(buffer, ' '))
+		*bp++ = 0;
+	else
+		bp = NULL;
+	if(strlen(buffer) > NAMELENGTH) {
+		fprintf(stderr, "Module name %s too long\n", buffer);
+		return -1;
+	}
+	strcpy(nambuf, buffer);
+	maxndef = maxpdef = xrefs = terms = 0;
+	/*
+	 * We don't look at the header again, so we can effectively
+	 * chop it off now
+	 */
+	baseptr = bufptr;
+	/*
+	 * Scan the module. This has three purposes, the most important of
+	 * which is to decide which modules to include from a library.
+	 * We also do some syntax checking here, and work out how much
+	 * space to allocate for some of the tables. (We could do that
+	 * at the same time as we allocate them, but then we'd use more
+	 * space and go slower.)
+	 */
+	while((c = NEXTBYTE()) != EOF) if(c == 0xFB) switch(c = NEXTBYTE()) {
+		/*
+		 * DEFINE directive
+		 * Can't define 0. Find limits on ids
+		 * --- leaving gaps in DEFINE list is wasteful of
+		 * linker memory. However, most code generators
+		 * will not produce such gaps.
+		 */
+		case 0x10:	c = NEXTBYTE() << 8;
+					c = (short)(c + NEXTBYTE());
+					if(c == 0)
+						return -1;
+					if(c < 0) {
+						c = -c;
+						if(c > maxndef)
+							maxndef = c;
+					} else {
+						if(c > maxpdef)
+							maxpdef = c;
+					}
+					if((c = nextbyte()) > NAMELENGTH) {
+						fputs("Name too long\n", stderr);
+						return -1;
+					}
+					SKIP(c);
+					break;
+		/*
+		 * Just check that comments are legal
+		 * (Is this really worth the effort?)
+		 */
+		case 0x02:	if((c = nextbyte()) > 80) {
+						fputs("Comment too long\n", stderr);
+						return -1;
+					}
+					skip(c);
+					break;
+		case 0x03:	fputs("ORG not supported\n", stderr);
+					return -1;
+		case 0x04:	sflag = 1;
+					oflag = 1;
+					SKIP(2);
+					break;
+		case 0x12:	sflag = 0;
+					oflag = 1;
+					SKIP(2);
+					break;
+		case 0x05:	if(!oflag) {
+						fputs("OFFSET outside section\n", stderr);
+						return -1;
+					}
+					SKIP(4);
+					break;
+		/*
+		 * XDEF directive
+		 * Establish whether it defines a currently undefined
+		 * (but not unseen) symbol; if so, we will definitely
+		 * include this module.
+		 */
+		case 0x06:	{
+						Symbol *sp;
+						char nambuf[NAMELENGTH+1];
+
+						if((c = nextbyte()) > NAMELENGTH) {
+							fputs("Name too long\n", stderr);
+							return -1;
+						}
+						getstr(nambuf, c);
+						if((sp = symbol(nambuf, 0)) && sp->undefined) {
+#ifdef DEBUG
+							fprintf(stderr, "%s resolved\n", nambuf);
+#endif
+							included = 1;
+						}
+						SKIP(6);
+					}
+					break;
+		/*
+		 * XREF directive
+		 * Do some syntax checking; also count up the number
+		 * of XREFs and XREF terms, so that we can allocate
+		 * memory efficiently.
+		 */
+		case 0x07:	if(!sflag) {
+						if(oflag)
+							fputs("XREF in dummy common section\n", stderr);
+						else
+							fputs("XREF outside section\n", stderr);
+						return -1;
+					}
+					SKIP(4);
+					c = NEXTBYTE();
+					switch(c & 0x07) {
+						case 1: case 2: case 4: break;
+						default: return -1;
+					}
+					if(((c & 0x18) == 0x18) || (c & 0x80)) 
+						return -1;
+					xrefs++;
+					if(c & 0x20)
+						terms++;
+					while((c = NEXTBYTE()) == '+' || c == '-') {
+						SKIP(2);
+						terms++;
+					}
+					if(c != 0xFB) {
+						if(c != EOF)	
+							if((isprint)(c))
+								fprintf(stderr, "Unknown XREF operator '%c'\n", c);
+							else
+								fprintf(stderr, "Unknown XREF operator %d\n", c);
+						return -1;
+					}
+					break;
+		case 0x13:	goto scanned;
+		case 0xFB:	if(!sflag) {
+						if(oflag)
+							fputs("Data byte in dummy common section\n", stderr);
+						else
+							fputs("Data byte outside section\n", stderr);
+						return -1;
+					}
+					break;
+		default:	fprintf(stderr, "Unknown directive %d\n", c);
+					return -1;
+	} else if(!sflag) {
+		if(oflag)
+			fputs("Data byte in dummy common section\n", stderr);
+		else
+			fputs("Data byte outside section\n", stderr);
+		return -1;
+	}
+scanned:
+	if(c == EOF)
+		return -1;
+#ifdef DEBUG
+	fprintf(stderr, "maxndef = %d, maxpdef = %d\n", maxndef, maxpdef);
+#endif
+	if(included) {
+#ifdef DEBUG
+		fputs("----------------------------------------------------------------\n", stderr);
+#endif
+		if(verbose)
+			if(bp) {
+				char *q;
+
+				/*
+				 * Skip any spare spaces in banner.
+				 * Note that we force a function call to isspace,
+				 * which requires that <ctype.h> define the function.
+				 * ANSI does, C68 has been known not to.
+				 * (<fctype.h> is an abomination.)
+				 * A macro call here would be pointless.
+				 *
+				 * Also, chop off any date marker in the banner;
+				 * this is added by my LREP program so that
+				 * update and freshen operations can be
+				 * sensibly performed.
+				 */
+				while((isspace)((unsigned char)*bp))
+					bp++;
+				if(q = strrchr(bp, '|'))
+					*q = 0;
+				if(!*bp) {
+					bp = NULL;
+					goto nobanner;
+				}
+				fprintf(stderr, "Module %s\n   --- %s\n", buffer, bp);
+			} else
+nobanner:			fprintf(stderr, "Module %s\n", buffer);
+	}
+#ifdef DEBUG
+	else
+		fprintf(stderr, "Skipping %s\n", buffer);
+#endif
+	return included;
+}
+
+static int load_mod(int i_init)
+{
+	int c;
+	register Byte *ptr, *wptr;
+	Module *mp;
+	Subsection *sec_defines;
+	Symbol **sym_defines;
+	Byte *xref_ptr;
+#ifdef DEBUG
+	Byte *xref_top;
+#endif
+	Subsection *current = NULL;
+	char nodata;
+	int result = 0;
+
+	c = scan_mod(i_init);
+	if(c < 0)
+		return -1;
+	else if(c == 0)
+		return 0;
+	/*
+	 * We have decided to include a module
+	 * Thanks to the input buffering system, the whole
+	 * module is now in memory at a predictable place.
+	 * First, link module onto end of list
+	 */
+	{
+		Module **mpp = &modules;
+
+		while(mp = *mpp)
+			mpp = &mp->next;
+		if(!mod_remain) {
+			mod_buf = safe_malloc(64 * sizeof(Module));
+			mod_remain = 64;
+		}
+		mod_remain--;
+		*mpp = mp = mod_buf++;
+		mp->next = NULL;
+		strcpy(mp->name, nambuf);
+		mp->contents = NULL;
+	}
+	/*
+	 * Allocate space for DEFINE and XREF directives;
+	 * zeroise where appropriate.
+	 * (NB, calloc() would _not_ be portably sufficient,
+	 * though it would do the right thing on most machines.)
+	 */
+#if 0
+	sec_defines = safe_malloc((maxndef+1) * sizeof(Subsection));
+	xref_ptr = safe_malloc(xrefs * sizeof(Xref) + (terms - xrefs) * sizeof(Term));
+#else
+	/* minimise calls to memory manager */
+	sec_defines = safe_malloc((maxndef+1) * sizeof(Subsection)
+	                          + xrefs * sizeof(Xref)
+							  + (terms - xrefs) * sizeof(Term));
+	xref_ptr = (Byte *)sec_defines + (maxndef+1) * sizeof(Subsection);
+#endif
+	/* sym_defines gets free()'d eventually */
+	if(maxpdef < MAXSYM)
+		sym_defines = local_syms;
+	else
+		sym_defines = safe_malloc((maxpdef+1) * sizeof(Symbol *));
+#ifdef DEBUG
+	xref_top = xref_ptr + xrefs * sizeof(Xref) + (terms - xrefs) * sizeof(Term);
+#endif
+	for(c = maxndef; c > 0; c--)
+		sec_defines[c].section = NULL;
+	for(c = maxpdef; c > 0; c--)
+		sym_defines[c] = NULL;
+	ptr = baseptr;
+
+#ifdef DEBUG
+	fputs("pass 2\n", stderr);
+#endif
+	/*
+	 * Second pass of module: work out sizes of subsections,
+	 * also define symbols. Don't record XREFs yet
+	 * since they have to be connected to an address.
+	 */
+	for(;;) if(*ptr++ != 0xFB) {
+pass_2_data:
+		if(nodata) {
+			fputs("Fatal error: attempt to initialise section UDATA\n", stderr);
+			exit(1);
+			/*
+			 * We will want to just write data into the text space
+			 * later on, so any error here must not be allowed
+			 * to propogate through to the next pass
+			 */
+		}
+		current->pc++;
+	} else switch(*ptr++) {
+		case 0x02:
+			/*
+			 * Output comments at this stage
+			 */
+			fputs("COMMENT: ", stderr);
+			fwrite(ptr + 1, (size_t)1, (size_t)*ptr, stderr);
+			fputc('\n', stderr);
+			ptr = ptr + *ptr + 1;
+			break;
+		case 0x04:
+		case 0x12: {
+			char type = ptr[-1] == 0x04 ? 1 : 2;
+			/*
+			 * Choose section. Make sure it's a legal one.
+			 * If we were in a section, update the length as
+			 * required.
+			 */
+			if(current && current->pc > current->length)
+				current->length = current->pc;
+			GETID(c, ptr);
+			if(c >= 0 || sec_defines[-c].section == NULL) {
+				fprintf(stderr, "Fatal error: illegal section id %d\n", c);
+				exit(1);
+				/* can't go on ... current MUST be sensible after here */
+			}
+			assert(-c <= maxndef);
+			current = &sec_defines[-c];
+			/* first visit to a section we get to choose if it's common or not */
+			if(current->section->common == 0)
+				current->section->common = type;
+			else {
+				if(current->section->common != type) {
+					fprintf(stderr, "Fatal error: %s is %s section\n",
+					        current->section->name,
+							type == 1 ? "an ORDINARY" : "a COMMON");
+					exit(1);
+				}
+			}
+			nodata = (type == 1 && !strcmp(current->section->name, "UDATA"));
+#ifdef DEBUG
+			fprintf(stderr, "%s %s\n", type == 1 ? "SECTION" : "COMMON", current->section->name);
+#endif
+			break;
+		}
+		case 0x05: {
+			long offset;
+
+			/*
+			 * Do an OFFSET directive
+			 * Make sure that length field records 'high water-mark'
+			 * of subsection even if we OFFSET backwards.
+			 */
+			GETLONG(offset, ptr);
+			if(current->pc > current->length)
+				current->length = current->pc;
+			current->pc = offset;
+#ifdef DEBUG
+			fprintf(stderr, "OFFSET %08lx\n", offset);
+#endif
+			break;
+		}
+		case 0x06: {
+			long offset;
+			Symbol *sp;
+
+			/*
+			 * Handle an XDEF. We know enough now to finish this
+			 * off in pass 2.
+			 */
+			ptr = getname(nambuf, ptr);
+			GETLONG(offset, ptr);
+			GETID(c, ptr);
+#ifdef DEBUG
+			fprintf(stderr, "XDEF %s %08lx %d\n", nambuf, offset, c);
+#endif
+			sp = symbol(nambuf, 1);
+			if(!sp->undefined) {
+				fprintf(stderr, "Symbol %s multiply defined\n", sp->name);
+				result = 1;
+				break;
+			}
+			if(c > 0 || (c != 0 && sec_defines[-c].section == NULL)) {
+				fprintf(stderr, "Illegal section id %d\n", c);
+				break;
+			}
+			assert(-c <= maxndef);
+			sp->module = mp;
+			sp->undefined = 0;
+			sp->base = c ? &sec_defines[-c] : NULL;
+			sp->offset = offset;
+			undefined--;
+			break;
+		}
+		case 0x07:
+#ifdef DEBUG
+			fputs("XREF ", stderr);
+#endif
+			if(nodata) {
+				fputs("Fatal error: attempt to initialise section UDATA\n", stderr);
+				exit(1);
+				/* see above */
+			}
+			/*
+			 * XREFs need to know where they're going
+			 * ...so they have to be processed on pass 3
+			 */
+			ptr += 4;
+			current->pc += *ptr++ & 0x07;
+			while(*ptr++ != 0xFB) {
+				GETID(c, ptr);
+				if(c < 0) {
+					assert(-c <= maxndef);
+					if(!sec_defines[-c].section) {
+						fprintf(stderr, "Fatal error: unknown section id %d\n", c);
+						exit(1);
+					}
+				}
+				else if(c > 0) {
+					assert(c <= maxpdef);
+					if(!sym_defines[c]) {
+						fprintf(stderr, "Fatal error: unknown symbol id %d\n", c);
+						exit(1);
+					}
+				}
+			}
+			break;
+		case 0x10: {
+			/*
+			 * DEFINE directive
+			 */
+			GETID(c, ptr);
+			ptr = getname(nambuf, ptr);
+#ifdef DEBUG
+			fprintf(stderr, "DEFINE %d %s\n", c, nambuf);
+#endif
+			if(c == 0) {
+				fprintf(stderr, "DEFINE 0 '%s' not allowed\n", nambuf);
+				result = 1;
+				break;
+			}
+			if(c < 0) {
+				Subsection *sbp, **sbpp;
+				
+				/*
+				 * New subsection
+				 */
+				assert(-c <= maxndef);
+				if(sec_defines[-c].section) {
+					fprintf(stderr, "Duplicate section id %d\n", c);
+					result = 1;
+					break;
+				}
+				/*
+				 * Link into modules list of subsections
+				 */
+				sec_defines[-c].module = mp;
+				sbpp = &mp->contents;
+				while(sbp = *sbpp)
+					sbpp = &sbp->nextm;
+				sbp = *sbpp = &sec_defines[-c];
+				/*
+				 * Fill in details
+				 */
+				sbp->next = NULL;
+				sbp->nextm = NULL;
+				sbp->length = 0;
+				sbp->pc = 0;
+				sbp->xrefs = NULL;
+				/*
+				 * Find section and link into section's list of
+				 * subsections
+				 */
+				sbpp = &(sbp->section = findsection(nambuf))->contents;
+				while(sbp = *sbpp)
+					sbpp = &sbp->next;
+				*sbpp = &sec_defines[-c];
+			} else {
+				/*
+				 * Reference to a symbol
+				 */
+				assert(c <= maxpdef);
+				if(sym_defines[c]) {
+					fprintf(stderr, "Duplicate symbol id %d\n", c);
+					result = 1;
+					break;
+				}
+				sym_defines[c] = symbol(nambuf, 1);
+			}
+			break;
+		}
+		case 0x13:
+#ifdef DEBUG
+			fputs("END\n", stderr);
+#endif
+			goto pass_2_done;
+		case 0xFB:
+			goto pass_2_data;
+#ifdef DEBUG
+		default:
+			fputs("[pass 2 error]\n", stderr);
+			exit(-19);
+#endif
+	}
+pass_2_done:
+	if(current && current->pc > current->length)
+		current->length = current->pc;
+	/*
+	 * For various reasons, we arrange for all required memory
+	 * to be allocated in a single gulp
+	 */
+	{
+		long total = 0;
+#if OUTPUT_ALIGN
+		int rv = rounding - 1;
+		int nrv = ~rv;
+#endif
+		
+		for(current = mp->contents; current; current = current->nextm) {
+			if(!current->section->common)
+				current->section->common = 1;
+			current->pc = 0;
+#if OUTPUT_ALIGN
+			current->length = (current->length + rv) & nrv;
+#endif
+#ifdef DEBUG
+			fprintf(stderr, "%s has %08lx bytes\n", current->section->name, current->length);
+#endif
+			if(strcmp(current->section->name, "UDATA") && current->section->common != 2)
+				total += current->length;
+		}
+		ptr = safe_malloc((size_t)total);
+#if 1
+		/* make 'gaps' zero */
+		memset(ptr, 0, (size_t)total);
+#endif
+		for(current = mp->contents; current; current = current->nextm) {
+			if(strcmp(current->section->name, "UDATA") && current->section->common != 2) {
+				current->text = (Byte *)ptr;
+				ptr += current->length;
+			} else
+				current->text = NULL;
+		}
+	}
+
+#ifdef DEBUG
+	fputs("pass 3\n", stderr);
+#endif
+	/*
+	 * Pass 3
+	 * In this pass we actually build the text of the module.
+	 * Since there still isn't enough information to actually
+	 * write the value of XREFs in, we build a table of them
+	 * for future reference.
+	 * The module has to be pretty close to correct to get
+	 * this far down!
+	 */
+	ptr = baseptr;
+	for(;;) if((c = *ptr++) != 0xFB) {
+pass_3_data:
+		assert(current);
+		assert(current->text);
+		assert(wptr >= current->text);
+		assert(wptr < current->text + current->length);
+		*wptr++ = c;
+	} else switch(*ptr++) {
+		case 0x10:
+#ifdef DEBUG
+			fputs("DEFINE ", stderr);
+#endif
+			ptr = ptr + 2;
+		case 0x02:
+			ptr = ptr + *ptr + 1;
+			break;
+		case 0x04:
+		case 0x12:
+			/*
+			 * Choose section (again.) Don't need to do error
+			 * checking here, unless someone is modifying our
+			 * data on the fly :-)
+			 */
+			if(current)
+				current->pc = wptr - current->text;
+			GETID(c, ptr);
+			assert(-c <= maxndef);
+			current = &sec_defines[-c];
+			wptr = current->text + current->pc;
+#ifdef DEBUG
+			fprintf(stderr, "%s %s\n", ptr[-1] == 0x04 ? "SECTION" : "COMMON", current->section->name);
+#endif
+			break;
+		case 0x05: {
+			long offset;
+
+#ifdef DEBUG
+			fputs("OFFSET ", stderr);
+#endif
+			assert(wptr >= current->text);
+			assert(wptr <= current->text + current->length);
+			GETLONG(offset, ptr);
+			wptr = current->text + offset;
+			assert(wptr >= current->text);
+			assert(wptr <= current->text + current->length);
+			break;
+		}
+		case 0x06:
+#ifdef DEBUG
+			fputs("XDEF ", stderr);
+#endif
+			ptr = ptr + *ptr + 7;
+			break;
+		case 0x07: {
+			Xref *xp, **xpp;
+			long offset;
+
+			/*
+			 * Process an XREF. Since the module text is about
+			 * to be lost, all XREFs must be recorded since there
+			 * still isn't sufficient information to actually
+			 * work out their values, and won't be until the end
+			 * of the link (or worse, until runtime.)
+			 * XREFs must be sorted, within a subsection, on
+			 * their address (for purposes of constructing
+			 * relocation tables)
+			 */
+			xpp = &current->xrefs;
+			while(xp = *xpp) {
+				if(xp->text > wptr)
+					break;
+				xpp = &xp->next;
+			}
+			xp = (Xref *)xref_ptr;
+			xref_ptr = (Byte *)xp->term;		/* array so no & */
+			xp->next = *xpp;
+			*xpp = xp;
+			xp->nexts = NULL;
+			xp->text = wptr;
+			GETLONG(offset, ptr);
+			xp->base = offset;
+			xp->rule = *ptr++ | alwaysrel;
+#ifdef DEBUG
+			fprintf(stderr, "XREF.%d %08lx", xp->rule & 7, xp->base);
+#endif
+			xp->terms = 0;
+			/*
+			 * Read the terms of the expression.
+			 * The (Term *)xref_ptr stuff could be made neater
+			 * in a couple of ways but without a really good
+			 * optimiser, this is strictly smaller and faster
+			 * than either.
+			 * There are three types of term; subsection, symbol
+			 * and 'here'. Each may be added or subtracted to
+			 * or from what has gone before.
+			 */
+			while((c = *ptr++) != 0xFB) {
+				int id;
+
+				xp->terms++;
+				((Term *)xref_ptr)->op = c;
+				GETID(id, ptr);
+#ifdef DEBUG
+				fprintf(stderr, "%c[%d]", c, id);
+#endif
+				if(id == 0) {
+					if(c == '+')
+						xp->base += wptr - current->text;
+					else
+						xp->base -= wptr - current->text;
+					((Term *)xref_ptr)->u.sec = current;
+					((Term *)xref_ptr)->sec = 1;
+				} else if(id < 0) {
+					assert(-id <= maxndef);
+					assert(sec_defines[-id].section != NULL);
+					((Term *)xref_ptr)->u.sec = &sec_defines[-id];
+					((Term *)xref_ptr)->sec = 1;
+				} else {
+					Symbol *sp;
+
+					assert(id <= maxpdef);
+					assert(sym_defines[id] != NULL);
+					sp = sym_defines[id];
+					if(sp->module != mp)
+						sp->used = 1;
+					((Term *)xref_ptr)->u.sym = sp;
+					((Term *)xref_ptr)->sec = 0;
+				}
+				xref_ptr += sizeof(Term);
+#ifdef DEBUG
+				terms--;
+#endif
+			}
+			/*
+			 * The PC-relative bit is redundant. So as to avoid
+			 * hacking around it later on, it is turned into a term
+			 * at this stage.
+			 */
+			if(xp->rule & 0x20) {
+#ifdef DEBUG
+				fputs("-PC", stderr);
+#endif
+				xp->rule ^= 0x20;
+				xp->terms++;
+				((Term *)xref_ptr)->op = '-';
+				xp->base -= wptr - current->text;
+				((Term *)xref_ptr)->u.sec = current;
+				((Term *)xref_ptr)->sec = 1;
+				xref_ptr += sizeof(Term);
+#ifdef DEBUG
+				terms--;
+#endif
+			}
+			assert(wptr >= current->text);
+			assert(wptr < current->text + current->length);
+			wptr += xp->rule & 7;
+			assert(wptr <= current->text + current->length);
+#ifdef DEBUG
+			fputc('\n', stderr);
+#endif
+#ifdef DEBUG
+			if(xref_ptr > xref_top) {
+				fputs("overflowed xref list\n", stderr);
+				exit(-5);
+			}
+			xrefs--;
+#endif
+			break;
+		}
+		case 0x13:
+#ifdef DEBUG
+			fputs("END\n", stderr);
+#endif
+			goto pass_3_done;
+		case 0xFB:
+			c = 0xFB;
+			goto pass_3_data;
+#ifdef DEBUG
+		default:
+			fputs("[pass 3 error]\n", stderr);
+			exit(1);
+#endif
+	}
+pass_3_done:
+#ifdef DEBUG
+	assert(xrefs == 0);
+	assert(terms == 0);
+#endif
+	if(sym_defines != local_syms)
+		free(sym_defines);				/* No longer required */
+	/*
+	 * Trash all the data read so far
+	 */
+	baseptr = bufptr;
+	return result;
+}
+
+static void skip(int count)
+{
+	do {
+		if(remain >= count) {
+			remain -= count;
+			bufptr += count;
+			return;
+		}
+		nextbyte();
+	} while(--count);
+}
+
+static void getstr(char buffer[], int count)
+{
+	if(remain >= count) {
+		memcpy(buffer, bufptr, (size_t)count);
+		buffer[count] = 0;
+		bufptr += count;
+		remain -= count;
+	} else {
+		char *p = buffer;
+
+		while(count--)
+			*p++ = nextbyte();
+		*p = 0;
+	}
+}
+
+/*
+ * Buffered input routine
+ * Text in the input buffer is divided into two parts by baseptr. That which
+ * falls after baseptr is to be preserved, since it is currently in use.
+ * That which is before baseptr is no longer of interest, and may be
+ * discarded when is ceases to be of interest.
+ */
+static int nextbyte(void)
+{
+	/*
+	 * If there is no data left, we must look for some more
+	 */
+	if(remain <= 0) {
+		long bytesread;
+
+#ifdef DEBUG
+		fputs("nextbyte() --- fill buffer\n", stderr);
+#endif
+
+		remain = 0;
+		/*
+		 * If there is space below the base pointer, then that is
+		 * shifted down
+		 */
+		if(baseptr > input_buffer) {
+			ptrdiff_t change = baseptr - input_buffer;
+
+			memmove(input_buffer, baseptr, (size_t)(bufptr - baseptr));
+			baseptr = input_buffer;
+			bufptr -= change;
+		}
+		/*
+		 * If there is no space left in the buffer, more must be allocated
+		 * Space is allocated in fairly large chunks, and the numbers
+		 * involved are optimised for fast scanning
+		 */
+		if(bufptr - input_buffer >= bufsize) {
+			Byte *newbuf;
+			ptrdiff_t change;
+
+#ifdef DEBUG
+			if(bufptr - input_buffer > bufsize) {
+				fputs("buffer overflow\n", stderr);
+				exit(-5);
+			}
+#endif
+			if(!(newbuf = realloc(input_buffer, (size_t)(bufsize += (input_buffer ? 6144 : 6144-64))))) {
+				fputs("Fatal error: out of memory\n", stderr);
+				exit(-3);
+			}
+			change = newbuf - input_buffer;
+			bufptr += change;
+			baseptr += change;
+			input_buffer = newbuf;
+		}
+		/*
+		 * Now try and fill up the buffer.
+		 * If we have read(), then it's probably better to use that;
+		 * there's no point buffering the input data twice. However,
+		 * we must be prepared to use fread() since that may be the
+		 * best that is available.
+		 *
+		 * This kind of 'windowing' buffering is so frequently required
+		 * that it should really have been included in some way in the
+		 * C standard, perhaps?
+		 */
+#if UNIX_IO
+		bytesread = read(fileno(infp), bufptr, (size_t)(bufsize - (bufptr - input_buffer)));
+#else
+		bytesread = fread(bufptr, (size_t)1, (size_t)(bufsize - (bufptr - input_buffer)), infp);
+		if(ferror(infp))
+			bytesread = -1;
+#endif
+		if(bytesread < 0) {
+			errorflag = 1;
+			return EOF;
+		}
+		if(bytesread == 0) {
+			eofflag = 1;
+			return EOF;
+		}
+		remain += bytesread;
+	}
+	/*
+	 * Return the value of the next byte in the buffer, and advance
+	 */
+	remain--;
+	return *bufptr++;
+}
+
+static long fileposition(void)
+{
+	long toppos;
+
+#if UNIX_IO
+	toppos = lseek(fileno(infp), 0L, 1);
+#else
+	toppos = ftell(infp);
+#endif
+	if(toppos == -1)
+		return -1;
+	return toppos - remain;
+}
+
+static Byte *getname(char buffer[], Byte *ptr)
+{
+	int l = *ptr++;
+	char *p = buffer;					/* for speed */
+
+	while(l--)
+		*p++ = *ptr++;
+	*p = 0;
+	return ptr;
+}
+
+#if !FASTEST
+static long getlong(Byte *ptr)
+{
+	long o;
+
+#if INPUT_BIGENDIAN
+# if MACHINE_BIGENDIAN
+	Byte *optr = (Byte *)&o;
+	*optr++ = *ptr++;
+	*optr++ = *ptr++;
+	*optr++ = *ptr++;
+	*optr++ = *ptr++;
+# else
+	o = *ptr++;
+	o = (o << 8) + *ptr++;
+	o = (o << 8) + *ptr++;
+	o = (o << 8) + *ptr++;
+# endif
+#else
+# if MACHINE_SMALLENDIAN
+	Byte *optr = (Byte *)&o;
+	*optr++ = *ptr++;
+	*optr++ = *ptr++;
+	*optr++ = *ptr++;
+	*optr++ = *ptr++;
+# else
+	o = *ptr++;
+	o |= *ptr++ << 8;
+	o |= *ptr++ << 16;
+	o |= *ptr++ << 24;
+# endif
+#endif
+	return o;
+}
+
+static int getid(Byte *ptr)
+{
+	short id;
+
+#if INPUT_BIGENDIAN
+# if MACHINE_BIGENDIAN
+	Byte *iptr = (Byte *)&id;
+	*iptr++ = *ptr++;
+	*iptr++ = *ptr++;
+# else
+	id = *ptr++;
+	id = (id << 8) + *ptr++;
+#endif
+#else
+# if MACHINE_SMALLENDIAN
+	Byte *iptr = (Byte *)&id;
+	*iptr++ = *ptr++;
+	*iptr++ = *ptr++;
+# else
+	id = *ptr++;
+	id |= *ptr++ << 8;
+#endif
+#endif
+	return id;
+}
+#endif

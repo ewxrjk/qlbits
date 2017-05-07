@@ -1,0 +1,159 @@
+------------------------------------------------------------------------
+
+                 LNK linker and CC/XCC compiler driver
+
+                              Release 1.1
+
+------------------------------------------------------------------------
+
+Requirements:
+
+	TK2
+	Disk drive
+	RAM expansion
+
+The LNK linker is a Ql linker designed to replace LD. As part of the
+package, I include a version of CC which contains LNK built in ('XCC').
+There is no need to use this if you prefer to keep the original CC; you
+can simply rename LNK to LD and carry on as before. A CC which calls an
+external linker is also supplied; it can be mungled around to support
+either LD or LNK (try Qjump CONFIG, or set some environment variables.)
+
+The linker supports "run-time modules" and further support code is
+provided; the idea of these is that code which many different programs
+all use should only exist in one place in memory, which is loaded
+*before* all such programs --- much like extension procudures for
+SuperBASIC, which can be used by the interpreter and any number of
+compiled jobs. There are, however, a number of problems (with C68, not
+LNK) to be solved before the C68 system can succesfully use this system.
+
+It is my intention to produce a version of LNK suitable for generating
+output for the Z80 and other 8 bit microprocessors (one size fits all).
+If you are interested in this, start off by trying changes to the first
+few lines of file lnk_h; this may be sufficient. If you have other
+requirements, get in touch.
+
+The support code includes ncrt_s and ncrt_o which carry out relocation
+for programs using RTMs. It is **not* necessary to use these with LNK if
+you do not use RTMs --- the crt_o supplied with C68 is quite adequate.
+Furthermore, if you do used ncrt_o then it is still not necessary to use
+rtm_rext unless you actually use RTMs; ncrt_o is capable of doing enough
+relocation to get all current programs by.
+
+The CC program knows about the following extensions:
+
+	Input	Program		Output
+
+	_c	cpp		_i
+	_x	cpp -P		_s
+	_i	c68		_s
+	_s	as68		_o
+	_asm	mac		_rel
+	_o	lnk		program
+
+This should cover most of what people are likely to throw at it. (The -P
+option for cpp stops is sticking control lines into assembler source,
+since as68 is incapable of understanding them.)
+
+The _x extension should only be used for assembler source that must be
+preprocessed; you should use _s for 'plain' assembler source otherwise
+you will waste time and space.
+
+The _asm extension refers to GST's Macro Assembler; you will need a
+version which knows about the TK2 default devices for this to be any
+use. Quanta sells such a version to members.
+
+The 'unproto' program is not supported, though it could be if anyone
+wanted; C68 now contains the functionality of that program and a bit
+more.
+
+The complete list of files is as follows:
+
+	Name		Type	Contents
+
+	bugs_txt		Bug list
+	cc		EXEC	New CC program
+	ccmain_c
+	ccusage_c
+	ccutil_c
+	cc_c
+	cc_txt			Documentation for cc
+	cmdexpand_c		Update of library code
+	cmdparams_c		Update of library code
+	config_asm
+	dem2_asm		RTM demo source
+	demo_asm		RTM demo source
+	globals_c
+	insrtm_asm		Code to install an RTM
+	insrtm_rel	SROFF	Code to install an RTM
+	libdem2		RESPR	RTM
+	libdem2_rtm		RTM definition for libdem2
+	libdemo		RESPR	RTM
+	libdemo_rtm		RTM definition for libdemo
+	list_c
+	lnk		EXEC	Linker
+	lnkmain_c
+	lnkusage_c
+	lnk_h
+	lnk_txt			Documentation for lnk
+	load_c
+	main_c
+	Makefile		Control compilation
+	ncrt_s			Source for startup that uses rtm_rext
+	ncrt_o		SROFF	Assembled ncrt_s
+	output_c
+	readme_txt		General information
+	readqdir_c		Update of library code
+	resolve_c
+	rtm_asm			Source for RTM manager
+	rtm_rext	RESPR	RTM manager
+	rtm_txt			Documentation for RTM system
+	sections_bas
+	sym_c
+	usedemo		EXEC	Demo program for RTMs
+	usedemo_asm		Source for usedemo
+	xcc		EXEC	CC with LNK built in
+	xcc_c
+
+Types are:
+
+			EXEC	Executable binary (use EX/EW)
+			RESPR	Resident extension (use LRESPR)
+			SROFF	Relocatable object file
+
+The following files are adapted from files that are part of the C68
+package:
+
+	cmdparams_c		Improvement
+	cmdexpand_c		Bug fix
+	readqdir_c		Bug fix
+	cc_txt			(from cc_doc) Many changes
+	ncrt_s			(from crt_s) Minor hacks
+	ncrt_o		SROFF	Assembled ncrt_s
+
+The improvements to cmdparams_c won't affect CC and LNK all that much;
+however, it was about time they were implemented. cmdexpand_c, as I had
+it, contained some rather serious bugs: not only was the number of files
+you could get from wildcard expansion limited, but they names were
+stored in the wrong place and tended to get overwritten (by the stack.)
+You can now have unlimited filenames. readqdir_c as presented here
+contains a single bug fix (I never suffered from this bug though) and a
+couple of changes to make using it a little easier.
+
+The entire package, with the exception of the files adapted from parts
+of the C68 package, is (c) 1993 Richard Kettlewell. You may redistribute
+the whole package provided that this paragraph is not altered and that
+all alterations are clearly marked as such.
+
+rtm_rext and the linked output generated from insrtm_asm, or the linked
+output of work derived from insrtm_asm, may be distributed as part of
+any package provided that the author is acknowledged.
+
+Any other form of redistribution is prohibited.
+
+	Richard Kettlewell
+        rjk@greenend.org.uk
+
+------------------------------------------------------------------------
+
+RJK 11/8/1993

@@ -1,0 +1,621 @@
+;
+; Startup code for C68 or PDQC on the QL
+;
+; CPP not required for this file
+;
+; 10/7/1993 LNK/RTM support and debugging by RJK
+; 28/7/1993 Added code so that rtm_rext is not required
+;
+
+	.text	 
+
+SPACE	equ	$20			; space character
+TAB	equ	$9			; tab character
+NEWLINE equ	$A			; newline
+SQUOTE	equ	$27			; Single quote
+DQUOTE	equ	$22			; Double quote
+EQUALS	equ	$3d			; Equals character
+PERCENT equ	$25			; Percent character
+TWO	equ	$32			; 2 character
+LESS	equ	$3c			; < character
+GREATER equ	$3e			; > character
+BACKSL	equ	$5c			; \ character
+
+err.bp	 equ	-15			; bad parameter
+
+NAM_SIZ  equ	32			; max size of name
+MIN_MEM  equ	$800			; 2k default memory allocation
+MIN_STK  equ	$400			; 1k minimum stack
+
+mt.inf	 equ	$00			; Get info
+mt.frjob equ	$05			; Force remove job
+mt.free  equ	$06			; Find free memory
+iop.pinf equ	$70			; Find pointer information
+sv_drlst equ	$44			; Driver list
+;d.magic equ	'$RTM'			; Magic number
+d.magic  equ	$2452544d		; Kludge around bug in as68
+d_link	 equ	$00			; Link to next driver
+d_magic  equ	$04			; Magic number to find driver
+d_add	 equ	$10			; Entry point to add names
+d_reloc  equ	$14			; Entry point to relocate
+
+	.globl	_PROGBASE
+	.globl	_DPNAME
+	.globl	_OSERR
+	.globl	ERRNO
+	.globl	FPERR
+	.globl	_SYS_VAR		; system variables address
+	.globl	_SPBASE 		; lowest address for stack
+	.globl	_SPTOP			; Top of stack
+
+_PROGBASE:
+	bra	START			; Jump past job header
+	dc.l	0
+	dc.w	$4AFB
+; Default program name plus space for expansion
+_DPNAME:
+	dc.w	6
+	dc.b	'C_PROG'
+	ds.b	26
+;
+; Four long words definineg the standard C program environment
+; 1). Pointer to signal structure for this job
+; 2). Pointer to program environment space
+; 3&4). Reserved for future expansion.
+;
+	dc.w	$4AFB			; Magic number of start of area
+	dc.l	0
+	dc.l	0
+	dc.l	0
+	dc.l	0
+
+; Sneaky place to put data needed to be accessed by thread routines (in range of a5)
+
+_OSERR:
+	dc.l	0			; operating system error
+ERRNO:
+	dc.l	0			; High level routines error no.
+FPERR:
+	dc.l	0			; Floating point error
+_SYS_VAR:
+	dc.l	0			; System variables
+namespace:
+	dc.b	3			; Namespace for RTM names
+	dc.b	'C68'
+;
+; Relocation code is in rtm_rext --- just find it and call it
+;
+; Code from here by RJK:
+;
+START:
+	trap	#0			; Stop list changing
+	moveq	#mt.inf,d0
+	trap	#1
+	move.l	sv_drlst(a0),a0 	; Head of list
+;
+findloop:
+	move.l	a0,d0			; Fallen off list yet?
+	beq	no_resident_relocator
+	cmp.l	#d.magic,d_magic(a0)	; Found RTM driver?
+	beq	foundit
+	move.l	/*d_link*/(a0),a0	; Next list element
+	bra	findloop
+;
+no_resident_relocator:
+;
+; No rtm_rext --- we must do the relocation manually
+;
+; If you want a GST style table, you must alter this code accordingly.
+; I can't think why you'd want to do that though.
+;
+; NB d0 is 0 from code above; if you make changes, be sure
+; to zeroise d0 somewhere!
+;
+	and.w	#$dfff,sr		; Back to user mode
+	move.l	#_BSS_START,a0		; Find start of relocation table
+	lea	_PROGBASE(pc),a1	; Base of program
+	move.l	a1,d3
+	add.l	a1,a0			; Make address absolute
+	move.l	(a0)+,d2
+	beq     rel3			; Null table unlikely
+	moveq	#1,d1			; Relocate faster
+	add.l	d2,a1			; Find first address to relocate
+	add.l	d3,(a1)			; Do the relocation
+rel1:
+	move.b	(a0)+,d0		; Get table entry
+	beq	rel3
+	cmp.b	d1,d0			; Special value?
+	beq	rel2
+	add.l	d0,a1			; Adjust pointer
+	add.l	d3,(a1)			; Relocate at new address
+	bra	rel1			; Look at next table entry
+rel2:
+	add.w	#254,a1			; Big jump without relocating
+	bra	rel1
+rel3:
+	tst.b	(a0)			; Any external names?
+	beq	relocated		; If not, all is ok
+	moveq	#err.bp,d0		; As good a choice as any
+	bra	go_down_in_flames
+;
+foundit:
+	and.w	#$dfff,sr		; Back to user mode
+	lea	_PROGBASE(pc),a2
+	move.l	#_BSS_START,a3
+	add.l	a2,a3
+	lea	namespace(pc),a1
+	move.l	d_reloc(a0),a4		; Relocation routine
+	jsr	(a4)			; Relocate ourselves
+relocated:
+;
+; Back to original code:
+;
+; Deal with any channels open for the job
+; There used to be some rather buggy code here.
+;
+	move.l	a7,_SP			; Save the stack pointer
+	move.l	a7,a5			; Copy stack pointer
+	move.w	(a5)+,d0		; Get the number of channels open
+	and.w	#$7fff,d0		; Ensure +ve
+	asl.w	#2,d0			; Multiply no. of channels by channel len 4
+	add.w	d0,a5			; Move pointer past stacked channels
+	move.l	a5,_CL			; save value command line for later
+	add.w	(a5),a5 		; ... plus length of command line
+;	add.l	#2,a5			; ... plus count field == end == environment area
+	move.l	a5,d0
+	addq.l	#3,d0			; make sure it's even
+	bclr	#0,d0			; (how did you miss that, guys?)
+;	move.l	a5,_ENV 		; save answer
+	move.l	d0,_ENV
+;
+;===========================================================================
+;  Parse Command Line (if any)
+;  ~~~~~~~~~~~~~~~~~~
+;   We now parse the command line for special characters
+;	=   Introduces stack size setting
+;	%   Introduces heap size setting
+;	<   Introduces input re-direction
+;	>   Introduces output re-direction
+;	>&  Introduces output & error re-direction
+;	'   Start-end of a string (treated as a single element)
+;	"   Start-end of a string (treated as a single element)
+;  At this stage we replace any command line fields we use up with space
+;  characters.	 This will simplify things later when we build up a vector
+;  of elements that will be  passed as parameters to the users 'main' module.
+;
+;  a5 is running pointer to command line point being parsed
+;----------------------------------------------------------------------------
+;
+	moveq	#0,d3
+	move.l	_CL,a5			; get command line start
+	move.w	(a5),d3 		; Get length of string
+	move.l	a5,-(a7)		; Stack parameters for call
+	move.l	a5,-(a7)		; ... overwriting existing string
+	jsr	qlstr_to_c		; ... convert to a C style string
+	addq.l	#8,a7			; tidy up stack
+	tst.w	d3			; See if there was a command line
+	beq	ENDCOM			; ... NO, skip command line parsing
+
+PARSCOM:
+	bra	ENDLOOP 		; Check for end of line
+SCAN:
+	bsr	WHILESPACE
+	cmp.b	#LESS,(a5)		; start of input file name?
+	beq	INP_NAM
+	cmp.b	#GREATER,(a5)		; start of output file name?
+	beq	OUT_NAM
+	cmp.b	#TWO,(a5)		; Could this be start of stderr redirect ?
+	bne	NT2
+	cmp.b	#GREATER,1(a5)
+	beq	ERR_NAM
+NT2:
+	cmp.b	#EQUALS,(a5)		; stack size specification?
+	beq	SET_STK
+	cmp.b	#PERCENT,(a5)		; workspace specification ?
+	beq	SET_WRK
+	cmp.b	#SQUOTE,(a5)		; Single quote
+	bne	NT5
+	bsr	PAST_QUOTE
+NT5:
+	cmp.b	#DQUOTE,(a5)		; Double quote
+	bne	NT6
+	bsr	PAST_QUOTE
+NT6:
+	bsr	WHILEWORD		; Get past a non white space
+ENDLOOP:
+	tst.b	(a5)
+	bne	SCAN
+;
+;  we have finished parsing the command line.
+;  We now need to calulate our dynamic memory requirements.
+;  Sanity checks are also done in case the user has
+;  supplied non-sensical values.   Also, we cannot exceed
+;  the actual memory free in the machine.
+;
+ENDCOM:
+	moveq	#mt.free,d0
+	nop				; stops TASKMASTER patching code
+	trap	#1			; QDOS call to find maximum free space
+	sub.l	_STACK,d1		; Returned in d1
+	tst.l	_MNEED			; See what memory was asked for
+	bmi	NASK			; Negative amount - subtract it from total memory
+	bne	PASK			; Positive amount - this is amount we will have
+	sub.l	_MEMQDOS,d1		; Zero asked for - memory is TOTAL - _MEMQDOS
+	bra	MEM2
+
+NASK:
+	add.l	_MNEED,d1		; _MNEED is negative here - so add it 
+	bra	MEM2
+
+PASK:
+	move.l	_MNEED,d1
+
+MEM2:
+	cmp.l	#MIN_MEM,d1		; make sure we get at least the minimum
+	bgt	MEM1
+	move.l	#MIN_MEM,d1		; set minimum memory size
+MEM1:
+	add.l	_STACK,d1
+	addq.l	#1,d1			; Make code space even
+	lsr.l	#1,d1
+	add.l	d1,d1			; d1 is now code space required
+	move.l	d1,d7			; Save space needed in d7
+;
+;  It is time to set up out initial data area
+;  The following code acts by first allocating the total space
+;  required to get it added to this programs memory allocation.
+;  It then does the following:
+;	a)  Allocate the data area
+;	b)  Allocate the stack area
+;	c)  deallocate the data area
+;  This apparently convoluted process is to get the stack to the
+;  end of the initial data area.   This means that if the stack
+;  outgrows its allocated space is will corrupt this programs data
+;  area before other items on the common heap.	 This MAY stop 
+;  QDOS from crashing if we are very lucky!
+;
+; Much of the following code was redundant and has therefore been
+; commented out... (you don't need to tidy the stack when you're
+; about to trash it!) RJK
+;
+	move.l	d7,-(a7)		; Set size required
+	jsr	lsbrk			; allocate area
+;	addq.l	#4,a7			; tidy up stack
+	tst.l	d0			; OK ?
+	beq	ABORT			; ... NO, so give up
+	move.l	d0,a3			; start address of area
+	move.l	(a3),(a7)		; actual size of area allocated
+	move.l	d0,-(a7)		; address of area allocated
+	jsr	rlsml			; Release area
+;	addq.l	#8,a7			; tidy up stack
+;	move.l	d7,d6			; original total size wanted
+	sub.l	_STACK,d7		; ... less stack space
+	move.l	d7,(a7) 		; set it on stack
+	jsr	lsbrk			; Allocate DATA space
+;	addq.l	#4,a7			; tidy up stack
+	move.l	d0,a3			; save result to deallocate later
+	move.l	_STACK,(a7)		; stack space required
+	jsr	lsbrk			; Allocate stack space
+;	addq.l	#4,a7			; tidy up stack
+	move.l	d0,a0			; start address of area
+	move.l	(a0),a0 		; ...actual size allocated
+	lea	0(a0,d0.l),a7		; Set up the stack for this C program (use actual space)
+; code here used to be 3 times as long...
+	move.l	d0,_SPBASE 		; save results for later checking
+	move.l	a7,_SPTOP
+;
+	move.l	d7,-(a7)		; size of DATA area
+	move.l	a3,-(a7)		; start of DATA area - use value saved earlier
+	jsr	rlsml			; release it
+	addq.l	#8,a7			; tidy up stack
+
+;   Now set up some standard global variables
+
+	moveq	#mt.inf,d0
+	trap	#1			; Get this job's id into d1.l
+	move.l	a0,_SYS_VAR		; Save address of system variables
+	move.l	d2,_DOS 		; Save QDOS version number
+
+; Test if Pointer Environment is present
+
+	moveq	#iop.pinf,d0
+	moveq	#0,d3
+	sub.l	a0,a0			; Use a0 = 0 as channel id (always a CON_)
+	trap	#3
+	tst.l	d0
+	bne	NO_PTRGEN
+	move.l	d1,_PTRGEN_VER
+
+NO_PTRGEN:
+
+	tst.b	_PROG_NAME		; Check if _PROG_NAME defined
+	beq	CLEARBSS		; No - leave default of C_PROG
+	pea	_PROG_NAME		; Yes, take user supplied C string
+	pea	_DPNAME 		; ... overwriting area reserved at program header
+	jsr	cstr_to_ql		; Copy progname to _DPNAME
+	addq.l	#8,a7			; tidy up stack
+;
+; We must now ensure that the whole of the BSS area of the
+; program is zero as C programs are entitled to assume this.
+; We assume that the relocation information is to be zeroed.
+; (The LD linker will have made this assumption).
+; (LNK likewise.)
+;
+CLEARBSS:
+	lea	_BSS_START,a0		; find bss
+	move.l	_SP,a1			; original stack pointer on entry
+NEXTBSS:
+	cmp.l	a0,a1
+	beq	STARTMAIN
+	clr.w	(a0)+
+	bra	NEXTBSS
+
+;====================================================================
+;  At this stage we need to finish setting up the program
+;  enviroment at the C level in preperation for passing control
+;  to the users 'main' module.
+;
+;  This involves:
+;	a)  Setting up the Environment variables
+;	b)  Completing parsing of the command line to build up
+;	    the parameter vectors for the user program.
+;	c)  Setting up the standard C channels 'stdin', 'stdout'
+;	    and 'stderr'
+;	d)  Setting up semaphores (currently this is really a dummy)
+;
+;  When all this has been done we can call the user's program.
+;-------------------------------------------------------------------
+;
+
+STARTMAIN:
+
+; Set up environment variables
+
+	move.l	_ENV,-(a7)		; set stack environment pointer
+	jsr	_envsetup		; set up environment
+
+; Parse command line parameters
+
+	move.l	_CL,(a7)		; set command line pointer
+	jsr	_cmdline		; and process command line
+	addq.l	#4,a7			; tidy up stack
+
+; Set up stdin, stdout and stderr
+
+	jsr	_stdchans
+
+
+; Set up semaphores
+;
+;	move.l	_nsems,d0
+;	bne	NOSEMS
+;	jsr	initsems
+;NOSEMS:
+
+; Finally it is time to call the user program
+
+	move.l	environ,-(sp)		; environment vectors
+	move.l	_ARGV,-(sp)		; argument vectors
+	move.l	_ARGC,-(sp)		; argument count
+	jsr	main			; ======= Call user program =========
+	lea	12(sp),sp		; tidy up stack
+	move.l	d0,-(sp)		; set return code
+	jsr	exit			; ... and call exit routine
+; should not return
+	move.l	(sp)+,d0		; but just in case...
+ABORT:
+	move.l	d0,-(sp)		; try the other one instead
+	jsr	_exit
+; should not return
+	move.l	(sp)+,d0		; ok --- you wanna play rough...
+go_down_in_flames:
+	move.l	d0,d3
+	moveq	#mt.frjob,d0
+	moveq	#-1,d1
+	trap	#1
+; should not return --- if we get here then we're in real trouble
+bad_exit:
+	bra	bad_exit
+
+;*******************************************************************************
+;************** END OF STARTUP CODE - SUPPORT SUBROUTINES FOLLOW ***************
+;*******************************************************************************
+
+; Subroutine to go past any white space ( moving a5).
+
+WHILESPACE:
+	bsr	WHITESPACE_CHAR
+	beq	SLOOP
+	rts
+SLOOP:
+	move.b	#SPACE,(a5)+		; ensure that character was really space and move on
+	bra	WHILESPACE
+
+
+; Subroutine to go past any non white space (moving a5)
+
+WHILEWORD:
+	bsr	WHITESPACE_OR_END
+	beq	WOUT
+	add.l	#1,a5
+	bra	WHILEWORD
+WOUT:
+	rts
+
+; Subroutine to go from one quote (single or double) to another (moving a5)
+;
+; 28/7/1993 RJK handle escape character properly
+;           (qv cmdparams_c)
+
+PAST_QUOTE:
+	move.b	(a5)+,d6		; Get either single or double quote
+PLOOP:
+	cmp.b	#BACKSL,(a5)		; Escape character?
+	bne	notbs
+	tst.b	1(a5)			; Can't be followed by null
+	beq	notbs
+	addq.l	#1,a5			; Step over it
+notbs:
+	cmp.b	(a5),d6 		; Have we found another ?
+	beq	POUT			; yes - return after incrementing a5
+	tst.b	(a5)	 		; are we at end of text ?
+	beq	DPOUT			; yes - return - do not increment a5
+	addq.l	#1,a5
+	bra	PLOOP
+POUT:
+	addq.l	#1,a5
+DPOUT:
+	bsr	WHILESPACE
+	rts
+
+;   Simple Check subroutines for whitespace character - sets condition codes
+
+WHITESPACE_OR_END:
+	tst.b	(a5)	 		; '\0' = end of field ?
+	beq	WH_END			; ... YES, jump
+WHITESPACE_CHAR:
+	cmp.b	#SPACE,(a5)		; SPACE = end of field?
+	beq	WH_END			; ... YES, jump
+	cmp.b	#TAB,(a5)		; TAB = end of field ?
+WH_END:
+	rts
+
+; Subroutines to put the names of the input and output files into static
+
+ERR_NAM:
+	move.b	#SPACE,(a5)+
+	lea	_ENAME,a1
+	bra	INP01
+
+OUT_NAM:
+	lea	_ONAME,a1
+	bra	INP01
+
+INP_NAM:
+	lea	_INAME,a1
+INP01:
+	moveq	#NAM_SIZ-1,d1		; set size of name field
+	move.b	#SPACE,(a5)+		; store space and get past "<" or ">"
+	bsr	WHILESPACE		; Go past any white space
+INP02:
+	bsr	WHITESPACE_OR_END	; end of field ?
+	beq	SCAN
+	move.b	(a5)+,(a1)+		; move across a character
+	move.b	#SPACE,-1(a5)		; space fill character taken
+	sf	(a1) 			; ensure '\0' terminated string
+	dbf	d1,INP02
+INOUT:
+	bra	SCAN
+
+; Set stack subroutine
+; N.B.	The user is not allowed to reduce stack
+;	below value specified in _STACK
+
+SET_STK:
+	bsr	GETNUM			; Returns number in d0
+	tst.l	d0
+	beq	ERROR			; No stack !!
+	cmp.l	#MIN_STK,d0		; Less than minimu allowed ?
+	bgt	STK_10			; ... NO, so jump
+	move.l	#MIN_STK,d0		; ... YES, rest to minimum
+STK_10:
+	cmp.l	_STACK,d0		; less than programmers minimum ?
+	bmi	SCAN			; ... YES, cannot override.
+	move.l	d0,_STACK		; set stack size
+	bra	SCAN
+
+; Set workspace subroutine
+; N.B.	The user is not allowed to reduce heap
+;	below value specified in _MNEED
+
+SET_WRK:
+	bsr	GETNUM			; Returns number in d0
+	tst.l	d0
+	beq	ERROR
+	cmp.l	_MNEED, d0		; less than programmers minimum ?
+	bmi	SCAN			; ... YES, cannot override
+	move.l	d0,_MNEED		; Set memory allocate size
+	bra	SCAN
+
+; Subroutine to return a number in d0
+; while getting number, replace text with spaces
+; Having got a number any following whitespace is skipped
+; update a5 as number taken
+
+GETNUM:
+	move.b	#SPACE,(a5)+		; change to space and move past '=' or '%'
+	moveq	#0,d0			; clear accumulator
+GET_02:
+	moveq	#0,d1
+	move.b	(a5),d1			; get digit
+	cmp.w	#$39,d1 		; check for numeric
+	bgt	END_GET
+	sub.w	#$30,d1
+	blt	END_GET
+	asl.l	#1,d0			; x2
+	move.l	d0,d7			; Use d7 as temporary storeage
+	asl.l	#2,d0			; x8
+	add.l	d7,d0			; x10
+	add.l	d1,d0			; add in new digit
+	move.b	#SPACE,(a5)+		; change old digit to space and move to next digit
+	bra	GET_02
+END_GET:
+	rts
+
+ERROR:
+	moveq	#err.bp,d0		; set "bad parameter"
+	bra	ABORT			; exit
+LAST:
+
+; The following are dummy calls to get the library version numbers included
+; in the program.  This also allow a message to be forced frorm the linker as
+; they are actually included.
+
+	dc.l	_LIBC_VER
+	dc.l	_LIBM_VER
+	dc.l	_LIBDEBUG_VER
+	dc.l	_LIBMALLOC_VER
+	dc.l	_LIBQPTR_VER
+
+	.data
+        
+	.globl	_DOS
+	.globl	_SP
+	.globl	_INAME
+	.globl	_ONAME
+	.globl	_ENAME
+	.globl	_PTRGEN_VER
+	.globl	_ARGC
+	.globl	_ARGV
+;
+; The following belong in .bss but due to crap coding above,
+; they must go here
+;
+_DOS:
+	dc.l	0			; QDOS version number
+_SP:
+	dc.l	0			; Original stack on program entry
+_CL:
+	dc.l	0			; Pointer to command line (if any) on program entry
+_ENV:
+	dc.l	0			; Pointer to Environment on stack (if any) on program entry
+_SPBASE:
+	dc.l	0
+_SPTOP:
+	dc.l	0
+_ARGC:
+	dc.l	0
+_ARGV:
+	dc.l	0
+_INAME:
+	ds.b	32
+_ONAME:
+	ds.b	32
+_ENAME:
+	ds.b	32
+_PTRGEN_VER:
+	dc.l	0			; Version of Pointer Interface running
+
+	.bss
+_BSS_START:
+

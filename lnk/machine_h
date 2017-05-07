@@ -1,0 +1,18 @@
+/*
+ * Host specific definitions
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+
+#if MC68000 || __MC68000__
+# define MACHINE_BIGENDIAN 1
+#endif
+
+/* if we can't work out the byte ordering, don't assume anything about it */
+#ifndef MACHINE_BIGENDIAN
+# define MACHINE_BIGENDIAN 0
+#endif
+#ifndef MACHINE_SMALLENDIAN
+# define MACHINE_SMALLENDIAN 0
+#endif
+

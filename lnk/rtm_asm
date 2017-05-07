@@ -1,0 +1,553 @@
+********************************************************************************
+* RTM Manager                                        (c) 1993 Richard Kettlewell
+*
+* Not ROMable --- but then, so much that relates to C68 isn't.
+* To make it ROMable, you must take the driver out into the heap and
+* put some code on the start of the RTM_LIST procedure to find it
+* again. It's not really worth the effort, though.
+*
+* To install, LRESPR it from SuperBASIC. Don't install from a multibasic!
+*
+err.no   equ      -6                         ; Not open
+err.nf   equ      -7                         ; Not found
+err.ex   equ      -8                         ; Already exists
+err.bn   equ      -12                        ; Bad name
+err.bp   equ      -15                        ; Bad parameter
+err.ni   equ      -19                        ; Not implemented
+*
+mt.inf   equ      $00                        ; Get info
+mt.frjob equ      $05                        ; Force remove job
+mt.alchp equ      $18                        ; Allocate memory
+mt.liod  equ      $20                        ; Link IO driver
+*
+io.sbyte equ      $05                        ; Send byte
+io.sstrg equ      $07                        ; Send string
+*
+bp.init  equ      $110                       ; Add procudures to SuperBASIC
+ca.gtint equ      $112                       ; Collect integer(s)
+ca.gtstr equ      $116                       ; Collect string(s)
+bv.chrix equ      $11a                       ; Allocate space on RI stack
+*
+bv_ntbas equ      $18                        ; Name table
+bv_nlbas equ      $20                        ; Name list
+bv_chbas equ      $30                        ; Channel table
+bv_chp   equ      $34                        ; Top of channel table
+bv_rip   equ      $58                        ; RI stack pointer
+*
+sv_drlst equ      $44                        ; Driver list
+*
+* Format of RTM driver block
+*
+d.magic  equ      '$RTM'                     ; Magic number
+*d.magic equ      $2452544D                  ; same in hex
+*
+d_link   equ      $00                        ; Link to next driver
+d_io     equ      $04                        ; dummy
+d_magic  equ      $04                        ; Magic number to find driver
+d_open   equ      $08                        ; Open driver --- always fails
+d_close  equ      $0C                        ; dummy
+d_add    equ      $10                        ; Entry point to add names
+d_reloc  equ      $14                        ; Entry point to relocate
+*
+* RTM driver entries beyond here subject to change without notice
+* (...and possibly for no obvious reason...)
+*
+d_nspcs  equ      $18                        ; Table of name spaces
+d.len    equ      $1C                        ; Length
+*
+* Format of a name space definition
+*
+ns_link  equ      $00                        ; Next name space
+ns_first equ      $04                        ; First name in space
+ns_name  equ      $08                        ; Name of name space (B-length)
+*
+* Format of a name definition
+*
+n_link   equ      $00                        ; Next name
+n_entry  equ      $04                        ; Address of code
+n_name   equ      $08                        ; Name itself (B-length)
+*
+         section  text
+*
+* Initialisation code
+*
+         lea      driver(pc),a0
+         lea      dummy_op(pc),a1
+         move.l   a1,d_open(a0)              ; Open routine will prevent a 'real' open
+         lea      r_add(pc),a1
+         move.l   a1,d_add(a0)               ; Routine to add name(s)
+         lea      r_reloc(pc),a1
+         move.l   a1,d_reloc(a0)             ; Routine to do relocation
+         moveq    #mt.liod,d0                ; Link driver into list
+         trap     #1
+         lea      procs,a1                   ; Add procedures to basic
+         move.w   bp.init,a0
+         jsr      (a0)
+         moveq    #io.sstrg,d0               ; Say hello
+         moveq    #imsgl,d2
+         moveq    #-1,d3
+         sub.l    a0,a0
+         lea      imsg,a1
+         trap     #3
+*
+return   rts
+*
+driver   dc.l     0                          ; link
+         dc.l     d.magic                    ; io/magic number
+         dc.l     0                          ; open
+         dc.l     0                          ; close
+         dc.l     0                          ; add
+         dc.l     0                          ; relocate
+         dc.l     0                          ; name space list
+*
+imsg     dc.b     'RTM manager 1.01 (c) 1993 Richard Kettlewell',10
+imsgl    equ      *-imsg
+dummy_op moveq    #err.nf,d0
+         rts
+*
+* r_add/d_add
+*
+*        In                         Out
+* D0                                Error code
+* D1-D3                             Undefined
+* A0     RTM driver                 Undefined
+* A1     Table to add from          Undefined
+* A2/A3                             Undefined
+*
+* This routine is called by a runtime module to link its name into the
+* appropriate name space. A1 points to the table which starts with an
+* entry defining the name space, and then has as many entries defining
+* symbols as required, followed by 8 bytes of 0.
+*
+* Each entry starts with 4 bytes of 0, followed by (for the name space
+* definition) _another_ 4 bytes of zero or (for symbol definitions) an
+* absolute pointer to the code for the symbol and then (in both cases)
+* a byte length string naming either the name space or the symbol.
+* If this lot comes to an odd length then there is an extra byte which
+* may have any value.
+*
+* If the name space specified doesn't exist, it is created. Otherwise
+* it is added to. There may be no conflicts --- they will cause an
+* error return; the extent to which symbols have been added is undefined.
+*
+* Using an absolute pointer isn't silly because RTMs have to be relocated
+* anyway, and that happens before they come here.
+*
+* 11/8/1993 Go into supervisor mode while the names are added. This makes
+*           sure that anyone who tries to install two RTMs at the same
+*           time from different jobs doesn't find their computer crashing.
+*           (Anyone who does anything so hostile probably wants a crash,
+*           anyway, so they'll be disappointed here.)
+*
+r_add    trap     #0                         ; Don't do two additions at once
+         move.l   a4,-(a7)
+         move.l   a0,a4                      ; More convenient
+         lea      d_nspcs(a4),a2             ; First look for name space
+*
+a_1      move.l   (a2),d0                    ; Run out yet?
+         beq.s    a_2
+         move.l   d0,a3
+         lea      ns_name(a3),a0             ; Actual name
+         addq.l   #8,a1
+         bsr      strcmp
+         subq.l   #8,a1
+         beq.s    a_3                        ; If the same, found it
+         lea      ns_link(a3),a2
+         bra      a_1                        ; Try again
+*
+a_2      move.l   a1,(a2)                    ; Link new name space
+         move.l   a1,a3                      ; All fields set up by preconditions
+*
+a_3      addq.l   #8,a1
+         moveq    #0,d0                      ; Clear bits 8-15
+         move.b   (a1),d0
+         addq.w   #2,d0
+         bclr     #0,d0
+         add.w    d0,a1
+         lea      ns_first(a3),a2            ; Point at first existing name
+*
+a_4      tst.l    4(a1)                      ; End of additions list?
+         beq.s    a_done                     ; If so, return
+*
+a_7      move.l   (a2),d0                    ; Find name in existing list
+         beq.s    a_5                        ; End?
+         move.l   d0,a3                      ; Address of entry in existing list
+*
+a_6      lea      n_name(a3),a0
+         addq.l   #n_name,a1
+         bsr      strcmp                     ; Compare names
+         subq.l   #n_name,a1
+         beq.s    conflict                   ; If equal, bomb out
+         bmi.s    a_8                        ; If existing < new, try next one
+         move.l   a3,n_link(a1)              ; Link new BEFORE existing
+         move.l   a1,(a2)                    ; Old pointer to existing
+*
+a_9      addq.l   #n_name,a1
+         moveq    #0,d0                      ; Clear bits 8-15
+         move.b   (a1),d0
+         addq.w   #2,d0
+         bclr     #0,d0
+         add.w    d0,a1                      ; This ok <= a1 was even to start with
+         bra      a_4                        ; Test it and move existing pointer
+*
+a_8      lea      n_link(a3),a2              ; Point at next existing entry
+         bra      a_7                        ; Back around
+*
+a_5      move.l   a1,(a2)                    ; Put new at end of existing list
+         lea      n_link(a1),a2              ; Point to newest end of existing list
+         bra      a_9                        ; Back around
+*
+conflict moveq    #err.ex,d0                 ; Clash --- that won't do at all
+         bra.s    a_ret
+*
+a_done   moveq    #0,d0                      ; :-)
+*
+a_ret    move.l   (a7)+,a4                   ; Restore register we said we'd preserve
+         and.w    #$dfff,sr
+         rts
+*
+* r_reloc/d_reloc
+*
+*        In                         Out
+* D0-D3                             Error code
+* A0     RTM definition             Undefined
+* A1     Name space                 Undefined
+* A2     Base of program            Undefined
+* A3     Relocation table           Undefined
+*
+* Does all relocation work for you --- you only need to find the actual
+* table.
+* It is assumed to be a LD style relocation table followed by an external
+* symbol table. Later versions will support stranger type of relocation
+* table, which will have odd magic numbers at the start. (Odd so that
+* this first version can notice that it doesn't understand the relocation
+* table!)
+* A3 points to a byte length string telling us which name space to relocate
+* in. 
+*
+* One day, A5 or A6 will hold the address of the data area (when a program
+* allocates its static data area at runtime.) Do people think it should
+* be A5 or A6, and why?
+*
+* On error, we do MT.FRJOB; if that doesn't work then we return with the
+* appropriate error code.
+*
+* 11/8/1993 Go into supervisor mode for the relocate, so that symbol
+*           lists can't change half way. Though all installation should
+*           be done at startup, before any commands are executed, it
+*           doesn't hurt to play safe.
+*
+r_reloc  trap     #0                         ; Don't add symbols during a relocate
+         move.l   a4,-(a7)
+         move.l   d_nspcs(a0),a4             ; List of name space
+*
+findnspc move.l   a4,d0                      ; Fallen off end?
+         beq.s    gotnspc                    ; Defer error
+         lea      ns_name(a4),a0             ; Actual name
+         bsr      strcmp                     ; Is it the right one?
+         beq.s    gotnspc                    ; Yes...
+         move.l   ns_link(a4),a4             ; No...
+         bra      findnspc
+*
+* To do: make nonspc (it's entered from several places) complain
+* that a given name space/name doesn't exist in some way that the
+* user actually gets to see about.
+*
+nonspc   moveq    #err.nf,d0                 ; Couldn't find something
+*
+quit     move.l   (a7)+,a4
+         and.w    #$dfff,sr
+*
+quit1    move.l   d0,-(a7)
+         move.l   d0,d3                      ; Error code
+         moveq    #mt.frjob,d0               ; Kill job
+         moveq    #-1,d1                     ; ...ourselves, in fact
+         trap     #1
+         move.l   (a7)+,d0                   ; Oops, we were BASIC
+         rts
+*
+badrel   moveq    #err.ni,d0                 ; Unknown table format
+         bra      quit
+*
+gotnspc  move.l   (a3)+,d0                   ; Get first longword
+         beq.s    donerel
+         btst     #0,d0                      ; Odd?
+         bne.s    badrel                     ; Unknown table format
+         lea      0(a2,d0.l),a1              ; Address of first relocation
+         move.l   a2,d2
+         add.l    d2,(a1)                    ; Relocate it
+         moveq    #0,d0                      ; Clear bits 8-31
+*
+ldrel    move.b   (a3)+,d0                   ; Get byte from relocation table
+         beq.s    donerel                    ; If 0, end of table
+         cmp.b    #1,d0                      ; If 1, special
+         beq.s    ld1
+         add.l    d0,a1                      ; Update pointer
+         add.l    d2,(a1)                    ; Relocate
+         bra      ldrel
+*
+ld1      add.w    #254,a1                    ; Add 254 and don't relocate
+         bra      ldrel
+*
+donerel  tst.b    (a3)
+         beq.s    xdone                      ; No external symbols
+         move.l   a4,d0                      ; Table exists?
+         beq      nonspc                     ; If not, error
+         move.l   ns_first(a4),a4            ; Name space
+         move.l   a3,a0                      ; Symbol table
+*
+xrel     tst.b    (a0)
+         beq.s    xdone                      ; Finished
+*
+x1       move.l   a4,d0
+         beq      nonspc                     ; Out of names
+         lea      n_name(a4),a1
+         bsr.s    strcmp
+         beq.s    xfound                     ; It's the right name
+         bpl      nonspc                     ; required > available --- no can do
+         move.l   n_link(a4),a4              ; Move along
+         bra      x1                         ; Try again
+*
+xfound   move.l   n_entry(a4),d2             ; Symbol address
+         move.l   n_link(a4),a4
+         moveq    #2,d0
+         add.b    (a0),d0
+         add.l    a0,d0
+         bclr     #0,d0
+         move.l   d0,a0                      ; A0 = relocation list for symbol
+         move.l   (a0)+,a1
+         add.l    a2,a1
+         add.l    d2,(a1)
+         moveq    #0,d0                      ; Clear bits 16-31
+*
+xdorel   move.w   (a0)+,d0                   ; Get offset word
+         beq      xrel                       ; 0 => done
+         cmp.w    #1,d0                      ; 1 => big jump
+         beq.s    xspecial
+         add.l    d0,a1                      ; Move
+         add.l    d2,(a1)                    ; Relocate
+         bra      xdorel
+*
+xspecial add.l    #65534,a1                  ; Large gap!
+         bra      xdorel
+*
+xdone    move.l   (a7)+,a4
+         and.w    #$dfff,sr
+         moveq    #0,d0
+         rts
+*
+* strcmp
+*
+*        In                         Out
+* D0                                Result
+* A0     String 0                   Preserved
+* A1     String 1                   Preserved
+*
+* Compare strings; returns...
+*        -1       A0 < A1
+*        0        A0 = A1
+*        1        A0 > A1
+*
+strcmp   movem.l  d2/d3/a0/a1,-(a7)
+         move.b   (a0)+,d2
+         move.b   (a1)+,d3
+*
+sc1      tst.b    d2
+         beq.s    sc0_f
+         tst.b    d3
+         beq.s    sc1_f
+         move.b   (a0)+,d0
+         cmp.b    (a1)+,d0
+         bne.s    sc_done
+         subq.b   #1,d2
+         subq.b   #1,d3
+         bra      sc1
+*
+sc_equal moveq    #0,d0
+         bra.s    sc_ret
+*
+sc_done  blo.s    sc_neg
+*
+sc1_f    moveq    #1,d0
+         bra.s    sc_ret
+*
+sc0_f    tst.b    d3
+         beq.s    sc_equal
+*
+sc_neg   moveq    #-1,d0
+*
+sc_ret   movem.l  (a7)+,d2/d3/a0/a1
+         rts
+*
+* SuperBASIC interface
+*
+* RTM_LIST[#channel,][namespace]
+*
+* If no name space is given, then the name spaces are listed. If one is
+* given then its contents is listed (sorted, too.)
+*
+* bug: if lists of name spaces or names change part way through, strange
+* things may happen. However, all changes should be done at startup
+* so this not really a problem.
+*
+r_list   bsr.s    getchan                    ; Get channel to work with
+         bne.s    ret
+         move.l   d_nspcs+driver(pc),a4
+         cmp.l    a3,a5
+         beq.s    listit
+         bsr      getname
+         bne.s    ret
+         moveq    #err.bp,d0
+         cmp.l    a3,a5
+         bne.s    ret
+         move.l   d_nspcs+driver(pc),a4
+*
+lst1     move.l   a4,d0
+         beq.s    lst2                       ; End of list?
+         move.w   0(a6,a1.l),d1              ; Length of string
+         cmp.b    ns_name(a4),d1             ; If lengths different, go to next
+         bne.s    lst3
+         lea      1+ns_name(a4),a2
+         move.l   a1,a3
+         bra.s    lst4
+*
+lst3     move.l   ns_link(a4),a4             ; Go to next
+         bra      lst1
+*
+lst2     moveq    #err.nf,d0                 ; Stack is tidied by basic
+*
+ret      rts
+*
+lst5     move.b   (a2)+,d0
+         cmp.b    2(a6,a3.l),d0
+         bne      lst3
+         addq.l   #1,a3
+*
+lst4     dbra     d1,lst5
+         move.l   ns_first(a4),a4
+*
+* List a list --- they share format so the same code may be used for both
+*
+listit   move.l   d6,a0
+         moveq    #-1,d3
+*
+listloop move.l   a4,d0
+         beq.s    listed
+         moveq    #io.sstrg,d0               ; Write string
+         moveq    #0,d2
+         lea      n_name(a4),a1              ; String to write
+         move.b   (a1)+,d2                   ; Get length
+         trap     #3
+         moveq    #io.sbyte,d0
+         moveq    #10,d1                     ; Newline 
+         trap     #3
+         move.l   n_link(a4),a4
+         bra      listloop
+*
+listed   moveq    #0,d0
+         rts
+*
+* getchan
+* Decides which channel to use
+*
+getchan  cmp.l    a3,a5
+         beq.s    nochan
+         tst.b    1(a6,a3.l)
+         bpl.s    nochan
+         move.l   a5,a4
+         lea      8(a3),a5
+         move.l   bv_rip(a6),a1
+         move.w   ca.gtint,a2                ; Get channel number
+         jsr      (a2)
+         bne.s    gotchan
+         move.l   a4,a5
+         addq.l   #8,a3
+         move.w   0(a6,a1.l),d6
+         addq.l   #2,a1
+         move.l   a1,bv_rip(a6)
+         mulu     #40,d6                     ; Index -> block offset
+*
+findchan moveq    #err.no,d0
+         add.l    bv_chbas(a6),d6            ; Add base of table
+         cmp.l    bv_chp(a6),d6              ; End of table
+         bhs.s    gotchan                    ; Overshot?
+         move.l   0(a6,d6.l),d6              ; Get id
+         tst.w    d6                         ; Bad number?
+         bmi.s    gotchan
+         moveq    #0,d0
+*
+gotchan  tst.l    d0
+         rts
+*
+nochan   moveq    #40,d6                     ; No channel => use #1
+         bra      findchan
+*
+* getname
+* Read a name without quotes
+*
+getname  moveq    #err.bp,d0
+         cmp.l    a3,a5                      ; Make sure there is >= 1 parameters
+         beq.s    noname
+         moveq    #15,d0                     ; Type mask
+         and.b    1(a6,a3.l),d0
+         subq.b   #1,d0                      ; String?
+         beq.s    is_str                     ; If so, use 'normal' method
+         moveq    #err.bn,d0                 ; Bad name
+         moveq    #0,d1                      ; Clear bits 16-31
+         move.w   2(a6,a3.l),d1              ; Get name code
+         bmi.s    noname                     ; -ve => no name --- error
+         lsl.l    #3,d1                      ; Scale up
+         add.l    bv_ntbas(a6),d1            ; Find name table entry
+         move.l   bv_nlbas(a6),a4
+         add.w    2(a6,d1.l),a4              ; Find name list entry
+         moveq    #0,d4
+         move.b   0(a6,a4.l),d4              ; Length of name
+         addq.w   #3,d4                      ; Round up to even
+         bclr     #0,d4                      ; Space needed for name
+         move.l   d4,d1
+         move.w   bv.chrix,a0                ; Ensure space is there
+         jsr      (a0)                       ; ...but do not allocate it yet...
+         move.l   bv_rip(a6),a1
+         sub.l    d4,a1                      ; Allocate the space now
+         move.l   a1,bv_rip(a6)
+         moveq    #0,d1
+         move.b   0(a6,a4.l),d1
+         move.w   d1,0(a6,a1.l)
+         move.l   a1,a2
+         bra.s    gscopy1
+*
+gscopy2  move.b   1(a6,a4.l),2(a6,a2.l)      ; Copy byte
+         addq.l   #1,a4                      ; Update
+         addq.l   #1,a2
+*
+gscopy1  dbra     d1,gscopy2                 ; Count down
+*
+ret_ok   addq.l   #8,a3
+         moveq    #0,d0
+*
+noname   tst.l    d0
+         rts
+*
+is_str   move.l   a5,a4
+         lea      8(a3),a5
+         move.l   bv_rip(a6),a1
+         move.w   ca.gtstr,a0
+         jsr      (a0)
+         bne      noname
+         move.l   a4,a5
+         move.l   a1,bv_rip(a6)
+         bra      ret_ok
+*
+* BP.INIT table
+* It seems to be regarded as a good thing to put these tables at the end
+* of the binaries in which they appear, so that the names be be altered
+* with relative ease.
+*
+procs    dc.w     2                          ; (8 + 1 + 7) / 8 as required
+         dc.w     r_list-*
+         dc.b     8,'RTM_LIST'
+         dc.w     0
+         dc.w     0
+         dc.w     0
+*
+         end

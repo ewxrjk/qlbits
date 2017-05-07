@@ -1,0 +1,97 @@
+/*
+ * Library table generator
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#include <string.h>
+#include <stdio.h>
+#include <qdos.h>
+#include <time.h>
+#include "lib.h"
+#include "opts.h"
+
+char _prog_name[] = "LTAB";
+char _version[] = "1.0";
+char _copyright[] = "(c) 1993 RJK";
+int _stack = 16000;
+void consetup_title();
+void (*_consetup)() = consetup_title;
+
+char vflag, lflag, hflag;
+
+Option opt_tab[] = {
+	{ 'v', "verbose", &vflag, NULL },
+	{ 'h', "help", &hflag, NULL },
+	{ 'l', "long", &lflag, NULL },
+	{ OPT_O_POS, NULL, NULL, NULL },
+	{ OPT_O_LIST, NULL, NULL, NULL }
+};
+
+#define LIBNAME 3
+
+void usage(void);
+
+int main(int argc, char **argv)
+{
+	int i;
+	Module *mp, **mpp;
+	int maxlen = 0;
+	int count = 0;
+
+	if(((argc = opt_collect(opt_tab, argc, argv)) < 0) || hflag) {
+		usage();
+		return hflag ? 0 : 1;
+	}
+	if(loadlib(opt_tab[LIBNAME].text, 0))
+		return -7;
+	mpp = &modules;
+	while(mp = *mpp) {
+		int matches = 0;
+
+		if(argc < 2)
+			matches = 1;
+		else
+			for(i = 1; i < argc; i++)
+				if(fnmatch(mp->name, argv[i])) {
+					matches = 1;
+					break;
+				}
+		if(matches) {
+			if(strlen(mp->name) > maxlen)
+				maxlen = strlen(mp->name);
+			mpp = &mp->next;
+			count++;
+		} else
+			*mpp = mp->next;
+	}
+	if(lflag)
+		for(mp = modules; mp; mp = mp->next) {
+			if(mp->date) {
+				struct tm *t;
+				time_t x = TIME_QL_UNIX(mp->date);
+
+				t = localtime(&x);
+				printf("%9ld %9ld %02d:%02d %02d/%02d/%04d %*s %s\n",
+				       mp->length, mp->text - text, t->tm_hour, t->tm_min,
+				       t->tm_mday, t->tm_mon+1, t->tm_year+1900,
+				       maxlen, mp->name, mp->banner);
+			} else {
+				printf("%9ld %9ld   :     /  /     %*s %s\n",
+				       mp->length, mp->text - text, maxlen, mp->name, mp->banner);
+			}
+		}
+	else
+		for(mp = modules; mp; mp = mp->next)
+			puts(mp->name);
+	return 0;
+}
+
+void usage(void)
+{
+	fprintf(stderr, "%s %s\n(c) 1993 Richard Kettlewell\n", _prog_name, _version);
+	fputs("---table SROFF library\n\n", stderr);
+	fputs("    LTAB [-hlv] libraryfile [module ...]\n\n", stderr);
+	fputs("    -h --help    This help\n", stderr);
+	fputs("    -l --long    Long form\n", stderr);
+	fputs("    -v --verbose Verbose\n", stderr);
+}

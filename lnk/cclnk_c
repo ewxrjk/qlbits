@@ -1,0 +1,66 @@
+/*
+ * Code to call LNK from cc
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+	comnam = ld_prog;
+	*combuf = 0;
+	if(output && *output) {
+		strcat(combuf, "-o");
+		strcat(combuf, output);
+		strcat(combuf, " ");
+	}
+	if(map)
+		if(sym)
+			strcat(combuf, "-ms ");
+		else
+			strcat(combuf, "-m ");
+	for(lp = plist; lp; lp = lp->next) {
+		strcat(combuf, "-L");
+		strcat(combuf, lp->path);
+		strcat(combuf, " ");
+	}
+	for(opt_p = opt_list; opt_p; opt_p = opt_p->next)
+		if(opt_p->type == 3) {
+			strcat(combuf, opt_p->path);
+			strcat(combuf, " ");
+		}
+	for(ip = ilist; ip; ip = ip->next) {
+		switch(ip->type) {
+			case I_MODULE:
+				strcat(combuf, ip->name);
+				break;
+			case I_LIBRARY:
+				strcat(combuf, "-l");
+				strcat(combuf, ip->name);
+				break;
+			case I_RTM:
+				strcat(combuf, "-r");
+				strcat(combuf, ip->name);
+				break;
+			default:
+				fputs("AARGH! Internal error scanning file list\n", stderr);
+				return -1;
+		}
+		strcat(combuf, " ");
+	}
+	/*
+	 * Execute the linker
+	 */
+	switch(execute(0)) {
+		case -1:
+			return 1;
+		case 1:
+			returncode = 1;
+			break;
+		case 0:
+			returncode = 0;
+			break;
+	}
+	/*
+	 * Delete temporary _o files
+	 */
+	for(ip = ilist; ip; ip = ip->next)
+		if(ip->type == I_MODULE && ip->temped)
+			unlink(ip->name);
+	return returncode;

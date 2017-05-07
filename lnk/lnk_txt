@@ -1,0 +1,730 @@
+------------------------------------------------------------------------
+
+                               LNK Linker
+
+                      (c) 1993 Richard Kettlewell
+
+------------------------------------------------------------------------
+
+                              Introduction
+
+------------------------------------------------------------------------
+
+Large programs are typically developed in a number of separate modules,
+each of which has a single source file. This is translated into machine
+code by a compiler; they must then be combined to produce a single
+executable program. This is the job of a linker.
+
+In the case of C68, the compiler consists of a series of three programs,
+'cpp', 'c68' and 'as68'; these are executed by another program 'cc'
+which can then execute the linker (although it is quite usual to call
+the linker directly.)
+
+A number of linkers run on the Ql. The most widespread for some time was
+the one written by GST; more recently, the LD linker from the C68
+compiler has become fairly predominant. 
+
+LNK was written to counter what the author perceived as deficiencies in
+LD; for that reason, it can replace LD with a minimum of fuss (cf the
+GST linker: changing between that and LD can be quite a bit of work.)
+
+------------------------------------------------------------------------
+
+                              Running LNK
+
+------------------------------------------------------------------------
+
+Throughout this manual, I represent commands like
+
+	ex lnk;'<command>'
+	ew lnk,#1;'<command>'
+
+by
+
+	lnk <command>
+
+A call to LNK looks like this:
+
+	LNK [-ACDNRXYabcdghinvxyz] [-m[s][t]] [-o output] [-u symbol]
+	    [-L path] [-s file] [-S size] file ... [-lr library] ...
+
+The notation '...' means that the previous item may be repeated; square
+brackets indicate that the item is optional. The [-abdghimnstvxz] means
+that any or all of the letters may be included, in any order; you can
+also distribute them over several space-separated options, for example:
+
+	lnk -a -bdi -z -otest fred_o joe_o
+
+(a command which isn't very useful, it merely illustrates the point.)
+The options -o, -u, etc do not have to be separated from their parameter
+by space but they may be. It's mostly matter of personal taste.
+
+The options are as follows; the comment '[ignore]' means that most
+people will never need to use the option in question.
+
+-A	Start allocating common sections from offset -32768. This allows
+	you to access 64k of common data with 16 bit offsets, although
+	you need to be aware of this when allocating space for the
+	common sections (the register pointing should point 32768 bytes
+	after the start of the data block used.)
+
+-C	Don't read a 'startup' file at all (usually crt_o is read before
+	any other files.)
+
+-D	Treat leading . as _
+	The GST assembler is incapable of generating symbol names with
+	an underscore as the first character. If -D is specified then a
+	'.' at the start of a symbol is automatically converted into an
+	underscore.
+
+-L	Extra library path
+	Specifies an extra place to look for library files, e.g.
+	'-Lflp1_mylib_' would specify that libraries are to be searched
+	for in directory flp1_mylib_ as well as the standard places.
+
+	There are no ordering requirements on -L relative to other
+	options.
+
+-N	Same as -CRX i.e. don't scan any 'standard' files.
+
+-R	Don't scan libc_rtm at the end of the link. Usually not required
+	since the absence of libc_rtm is NOT an error.
+
+-S	Explicitly set the program dataspace size. Considerations such
+	as the relocation table are ignored.
+
+-X	Don't scan libc_a at the end of the link.
+
+-Y	Ignore relocation table [maybe ignore?]
+	Forces LNK to forget about the relocation table when deciding
+	the program data space: produces slightly larger dataspace
+	values. The tables are still generated in the same place.
+
+	This option is definitely required for some situations, though I
+	intend to introduce an alternative at some point.
+
+-Z	Define .COMSIZE
+	Defines symbol .COMSIZE as the total size of all common
+	sections. This will always be even since every section is
+	rounded up to be an even size.
+
+	If .COMSIZE is defined somewhere in your program then you will
+	get a warning about it.
+
+-a	Don't always relocate [ignore]
+	Other linkers need to be told whether to generate relocation
+	information for specific parts of the program; LNK doesn't, it
+	can work it out for itself. However, you may have a good reason
+	for turning this feature off in which case -a is for you, in
+	which case LNK will only even consider relocation where it is
+	told to. 
+
+-b	Align to longword boundaries [ignore]
+	Subsections in the linker output are usually word aligned, but
+	you may have a good reason for wanting them to be longword
+	aligned. There isn't much point to this unless the code
+	generator tries to do longword alignment as well.
+
+-c	Don't overlay common sections
+	Usually, all the subsections in a given common section start at
+	the same offset; however, this is not always desirable and with
+	the GST linker the only way to prevent any overlaying is to
+	never use the same common section twice.
+
+	LNK is capable of overlaying common sections or not, according
+	to local needs.
+
+	Note that LNK always treats common sections according to the
+	'COMMON DUMMY' model of the GST linker; I could alter this if it
+	was really necessary but it would probably still be impossible
+	to initialise common sections to non-zero values; there are
+	overlay problems.
+
+-d	LD style relocation table [ignore]
+	This option is currently redundant, since LNK generates LD style
+	tables unless you tell it not to.
+
+-g	GST style relocation table [ignore]
+	The relocation table usually uses the compact LD format; you may
+	have a good reason for using the GST format, in which case this
+	option is for you. Your software needs to be aware of the format
+	used, however.
+
+-h	Help
+	Lists a brief summary of each option.
+
+-i	MAIN == main [ignore]
+	This option is currently redundant.
+
+-l	Scan a library
+	Scan a library; '-lm' would scan 'libm_a'. 'libc_a' is always
+	scanned after all other libraries, but before libc_rtm (see
+	below.)
+
+-m	Output map
+-ms	Output map and symbol table
+	Generates a map of the program to name_map, where name is the
+	name of the program.
+
+-n	MAIN != main [ignore]
+	Specifies that letter case be taken into account when comparing
+	symbol names. So 'MAIN' and 'main' become different symbols,
+	with no relationship between them. Most Ql software assumes that
+	'MAIN' and 'main' are the same, so use this option with care.
+
+-o	Set output name
+	Without this option, the program is written to 'a_out' but that
+	isn't very useful. This option gives you more choice.
+
+-r	Scan a RTM definition 
+	'-rm' will scan 'libm_rtm'. A RTM definition is a table of names
+	(in a special format) that are defined in some RTM; see below.
+
+-s	Set startup file
+	The normal startup file --- a file which is included in the link
+	before any others --- is 'crt_o'; this option lets you change
+	it.
+
+	The startup file is searched for in a variety of places,
+	including the current data directory and the directories
+	specified by -L.
+
+-t	Send -m, -ms output to stdout [ignore]
+	Output generated by -m and -ms is sent to LNK's standard output
+	instead of the 'map' file, which is not created.
+
+-u	Create an undefined symbol [ignore]
+	Allows you to mark a symbol as undefined if you are linking from
+	libraries only with no startup file, e.g. '-ufred' enters 'fred'
+	into the symbol table with no definition.
+
+-v	Verbose mode [ignore]
+	Causes extra information to be displayed during and after the
+	link; in particular, you get a list of modules as they are
+	included, and some information about the symbol table occupancy
+	which probably won't be very interesting.
+
+-x	Write rtm description [mostly ignore]
+	Write the contents of section RTM to file 'name_rtm' where name
+	is the name of the program. Intended to assist the construction
+	of runtime modules, but could be put to all sorts of interesting
+	uses...
+
+-y	Make UDATA the size of common sections [maybe ignore?]
+	This throws away any UDATA contributions (with a warning if they
+	are non-trivial) and arranges the size of UDATA (and therefore
+	the size of the program dataspace, give or take some space for
+	the relocation table) to be the same as the cumulative size of
+	common sections.
+
+-z	Non-executable output
+	Sets the output filetype and dataspace to 0. Used when you're
+	producing resident extensions or the like, as opposed to
+	executable programs.
+
+Filenames given without an option are included as object modules.
+Ordering relative to libraries and RTM definitions is significant.
+
+------------------------------------------------------------------------
+
+                             Error Messages
+
+------------------------------------------------------------------------
+
+The most common error messages will be those relating to undefined
+symbols or absent files. These speak for themselves; however, note that
+the absence of the 'standard' RTM definition file (usually libc_rtm) is
+not regarded as an error so much as a warning.
+
+You will sometimes get messages complaining about 'residual
+relocations'. This will usually be caused by errors in the program being
+linked, but what it reflects is that the value of an external reference
+needs to have the base of the program added to it more than once (or
+needs to have it subtracted.)
+
+For example, if you tried to initialise a global as
+
+	int x = (int)printf + (int)scanf;
+
+then the code generated would be something like the following:
+
+		xref	printf
+		xref	scanf
+	x	dc.l	printf+scanf
+
+This could be handled by putting the address of x into the relocation
+table twice; however, it becomes more complicated when you need to
+relocate, say 100 times or -1 times; LNK (and other linkers) only
+support single relocation.
+
+------------------------------------------------------------------------
+
+                              Search Order
+
+------------------------------------------------------------------------
+
+Ordinary object modules are only searched for in the current data
+directory; the one exception to this is the startup file, which is
+looked for in the following places:
+
+	Data directory
+	Directories given by -L, in order
+	LIB directory
+
+The LIB directory is either the directory given by the LIB environment
+variable, or, if that is not defined, the lib_ subdirectory of the
+program directory.
+
+Library files and RTM definitions are searched for in a variety of
+places as well; the library 'c' is searched for as 'libc_a' in the same
+places as the startup file, and then as 'c' in those places. So you
+could specify a library like 'libm_a' with either '-lm' or '-llibm_a'.
+
+The _a suffix for libraries is borrowed from Unix, where a library is a
+type of 'archive'.
+
+Within a library, only one scan is made, so modules should be ordered
+appropriately. You can either do this with the combination of 'slb' and
+'tsort', or you can use the 'lsort' program that I wrote (available from
+me, or possibly other sources.)
+
+------------------------------------------------------------------------
+
+                         Environment Variables
+
+------------------------------------------------------------------------
+
+Several environment variables are used by LNK; they are:
+
+	LIB		The standard library directory. If undefined
+			then the 'lib_' subdirectory of the program
+			directory is used instead.
+
+	LNK_OUTPUT	The name to use for output if -o isn't given. If
+			this is undefined, 'a_out' is assumed.
+
+If any of the following are defined as an empty string then 'no file' is
+assumed:
+
+	LNK_STARTUP	The 'startup' file to be included before modules
+			named on the command line. If undefined, 'crt_o'
+			is assumed.
+
+	LNK_STDLIB	The library to scan at the end of the link. If
+			undefined, 'c' is assumed so that 'libc_a' is
+			scanned.
+
+	LNK_STDRTM	The RTM definition to scan at the end of the
+			link. If undefined, 'c' is assumed so that
+			'libc_rtm' is scanned.
+
+The following are all 'flag' variables and are considered active if they
+are defined as a non-empty string; they have the effect of various
+command line options:
+
+	Name		Option	Use
+
+	LNK_REL		-a	Assume assembler produces 'correct'
+				output
+	LNK_LONG	-b	Align sections to longword boundaries
+	LNK_GST		-g	Produce GST style relocation table
+	LNK_CASE	-n	Don't convert all symbols to upper case
+
+The main use of these is in situations where you can't get at the LNK
+command line properly, e.g. with the XCC and CC programs.
+
+------------------------------------------------------------------------
+
+                              List Output
+
+------------------------------------------------------------------------
+
+The map generated by -m is in the same order as modules were included.
+It begins with a heading line as follows:
+
+    TEXT     DATA    UDATA Module
+
+In this, each section is listed in the order in which they appear in the
+output. Each field is at least 8 characters wide and wider if section
+names are longer; they are separated by single spaces. The heading
+'Module' appears at the end.
+
+After a blank line, the modules are listed, one per line, in the form of
+the following:
+
+0000036E 00000084          crt_o
+000018BE          0000004C load_o
+0000105A 0000002E 00000088 main_o
+00000672                   output_o
+000004A6                   resolve_o
+000005E2 00000038 00000008 sym_o
+         00000010 00000226 globals_o
+
+The length of each modules contribution to a section is given, or left
+blank if there is no contribution (or a 0 length contribution, which is
+different.)
+
+The main program map appears as follows:
+
+Section     Start   Length
+
+TEXT            0     AE08
+DATA         AE08      77A
+UDATA        B582      78A
+
+A similar table follows listing dummy common sections, except that the
+'Start' field is replaced by an 'Offset' field.
+
+The symbol table generated by -ms has a header as follows:
+
+Symbol           Offset  Section Module
+
+which is followed by a blank line and then the sorted list of symbols.
+The field for the symbol name is made wide enough to accomodate all
+symbols.
+
+The offset field is either the offset from the base of the program (for
+symbols with relocation factor 1), or the absolute value of the symbol
+(for symbols with relocation factor 0.) It may also be 'Undefined' or
+'External' if the symbol falls into that category.
+
+For symbols which are neither undefined nor external, a section name is
+given (if they have relocation factor 1) or left blank (relocation
+factor 0) and this is followed by the name of the module in which the
+symbol was defined.
+
+The module name may be followed by the message '[unused]' which
+indicates that the symbol is not used outside the module which defines
+it. It may be referred to in an XREF from within the module which
+defines it.
+
+------------------------------------------------------------------------
+
+                 Differences between LNK and GST Linker
+
+------------------------------------------------------------------------
+
+The GST linker mechanism of a 'control file' offers a high degree of
+flexibility; LNK can't quite match it, but you can usually get the same
+results with a bit of effort.
+
+The ordering of modules and libraries is easy to achieve; you may choose
+to use command line option -N to get maximum control over the files
+scanned.
+
+Section ordering is more difficult; the trick you have to use is
+slightly roundabout. If your assembler declares sections in the same
+order that you do then you can simply construct a source file containing
+section declarations in the appropriate order; failing that you must
+construct an object file by hand. A basic program is supplied
+('sections_bas') which should give you an idea of the technique.
+
+The GST assembler --- or at least, my copy of it --- sorts sections into
+alphabetical order (bad news) so you must use sections_bas instead.
+
+Methods of selecting 'COMMON DUMMY' or 'COMMON END' are academic since
+LNK always forces you to use COMMON DUMMY, though this may be changed in
+a later version. LNK also allows you to have non-overlapping common
+sections (command line option '-c'), which is something I for one have
+long wished for.
+
+The EXTRACT command can't be emulated at all; you must use a program
+like LEXT or SLB to extract the module and then include it like any
+other. (Do people desparately want an EXTRACT command? Let me know, I
+will implement one if there is demand.)
+
+There are a number of control files in the GST linker manual; the
+corresponding LNK commands are:
+
+(page 14)
+	lnk -N mdv1_linit_rel mdv1_syslib_rel <files> -lmdv1_llib_rel
+
+(page 16)
+	lnk -N mdv1_linit_rel <files> mdv1_llib_rel
+
+In practice, you would eithe use -s to set mdv1_linit_rel as a standard
+startup module, or define LNK_STARTUP to achieve the same end. The -N
+option prevents lnk from reading 'crt_o', 'libc_a' or 'libc_rtm'. Note
+also that -l doesn't have to be given <x> from lib<x>_a --- it can be
+given ordinary filenames as well.
+
+The RELOC command is impossible to emulate; relocation information is
+always placed in the special section UDATA. This is a feature that LNK
+shares with LD and is one of the main ways in which LNK and LD contrive
+to produce smaller output files than the GST linker.
+
+The OFFSET command is also impossible to do on LNK; I can't imagine this
+seriously inconveniencing anyone. The DEFINE command only exists in the
+form of the -u option which is almost the opposite.
+
+NB the OFFSET and DEFINE commands in a control file are not related to
+the OFFSET and DEFINE directives in a SROFF object module!
+
+------------------------------------------------------------------------
+
+                        Relocation Table Formats
+
+------------------------------------------------------------------------
+
+There are currently two relocation tables generated by LNK. The first of
+these is just 'the relocation table' and describes a sequence of program
+addresses to which the address of the base of the program should be
+added. This table may be in either GST style or LD style.
+
+The second is a sequence of external names --- symbols which may be
+found in RTMs --- each with a sequence of program addresses to which the
+address of the symbol should be added. It is called the 'external symbol
+table'.
+
+The first table appears at the start of section 'UDATA', which is always
+at the end of the program. The second table starts immediately after the
+end of the first, with no padding.
+
+For the two types of internal relocation table, I list appropriate code
+to do the relocation. However, you're better off just calling rtm_rext
+which does the job for you (and will be aware of any future table
+formats.)
+
+
+GST Style Relocation Table
+
+This is a longword giving the count of addresses, followed by the offset
+of each address from the start of the program. Suitable relocation code
+is:
+
+	lea	prog_base(pc),a0	; Find load address
+	move.l	#bss_start-prog_base,a1	; Offset of relocation table
+	add.l	a0,a1			; Address of relocation table
+	move.l	(a1)+,d0		; Count
+	beq	gst_done		; If none, do nothing
+gst_loop:
+	move.l	(a1)+,d1		; Offset to relocate
+	add.l	a0,0(a0,d1.l)		; Do the relocation
+	subq.l	#1,d0			; Count down
+	bne	gst_loop
+gst_done:
+
+It is assumed that prog_base is the start of the program and bss_start
+is a label at the beginning of section UDATA.
+
+
+LD Style Relocation Table
+
+This consists of a longword giving the first offset, or 0, followed by a
+sequence of bytes which should be added to the last offset to find the
+next. A byte of 0 ends the table; a byte of 1 means that 254 should be
+added and the resulting address not relocated.
+
+	lea	prog_base(pc),a0	; Find load address
+	move.l	#bss_start-prog_base,a1	; Offset of relocation table
+	add.l	a0,a1			; Address of relocation table
+	move.l	(a1)+,d0		; First offset
+	beq	ld_done			; Do no work
+	lea	0(a0,d0.l),a2		; Address to relocate at
+	add.l	a0,(a2)			; Relocate first item
+	moveq	#0,d0			; Clear bits 8-24
+ld_loop:
+	move.b	(a1)+,d0		; Byte to work with
+	beq	ld_done			; If 0, end of table
+	cmp.b	#1,d0
+	beq	ld_254			; If 1, special action
+	add.l	d0,a2			; Adjust pointer
+	add.l	a0,(a2)			; Do the relocation
+	bra	ld_loop			; Look at next byte
+ld_254:
+	add.w	#254,a2			; Move forward by 254 bytes
+	bra	ld_loop			; Don't relocate here
+ld_done:
+
+This is not the smallest possible type of relocation table, even using
+simple formats; you could have each byte represent half the distance to
+the next longword to be relocated, for example. This might not be too
+effective, though, with (for example) compiled C programs where the
+average distance between adjacent entries is quite small; and the
+relocation process would be slower.
+
+
+External Symbol Table
+
+This is a sorted list of names, each of which has a byte length. After
+the text of the name, there may be a padding byte (of undefined value)
+if that is necessary to align further data on a word boundary.
+
+The table of addresses to relocate begins with a longword giving the
+first, which will not be zero. Further entries are word values which are
+added to the last address to find the next; a zero means end of entry
+and a 1 means add 65534 and don't relocate.
+
+The last entry is followed by a single zero byte to mark the end of the
+table.
+
+See rtm_txt and associated files.
+
+------------------------------------------------------------------------
+
+                           Object File Format
+                               ('SROFF')
+
+------------------------------------------------------------------------
+
+The format of object files will only be of interest to people writing
+assemblers or other programs which generate output in this format; it is
+not necessary to understand it to use files following this format.
+
+Each module is a sequence of data bytes and directives, starting with a
+SOURCE directive and terminated by an END directive. Traditionally files
+containing such modules are of type 2.
+
+A data byte is any byte apart from FB; a directive starts with the byte
+FB. The special directive FB FB is equivalent to a data byte of code FB.
+Within the module, there are no alignment requirements.
+
+Within a directive, a string is a byte giving the length of the string,
+followed by up to 255 bytes giving the text of the string. A symbol is a
+string of no more than 32 characters starting with a letter or '.' and
+containing only letters, digits, '$', '_' or '.'. In practice, the only
+restrictions you need to follow are to keep lengths no greater than 32
+and probably to avoid null characters.
+
+A section is a block of code generated by the linker. Each module makes
+a contribution to 1 or more sections; such a contribution is called a
+subsection. Within a module, each subsection may be broken into several
+parts.
+
+In the output file, each subsection will be word aligned, but each part
+of a subsection will not. I would suggest that forward looking authors
+would make their linkers align subsections on longword boundaries.
+
+Section names, module names and symbol names occupy disjoint name
+spaces; there is no possibility of confusing the linker, though
+confusing humans is certainly possible.
+
+The directives are as follows:
+
+SOURCE		FB 01 string
+
+	Marks the start of a module. The string should contain a module
+name, which is essentially a symbol, possibly followed by an information
+field or banner; if there is a banner then it is separated from the name
+by a space, and is no longer than 80 characters in length.
+
+	The lrep program assumes that if there is a '|' character in the
+banner then it is followed by the hexadecimal update date of the module.
+LNK is aware of this.
+
+	The slb and ld programs have bugs in that they don't seem to
+believe anyone will ever include a banner in a module, a remarkably
+short-sighted attitude.
+
+COMMENT		FB 02 string
+
+	Defines a comment, which is no longer than 80 characters, which
+should be printed by the linker if the module is included.
+
+ORG		FB 03 longword
+
+	Marks the start of an absolute section. I don't think anyone has
+ever come up with a sensible use for this; on the GST linker it needs to
+be combined with the OFFSET command in the linker control file to get
+meaningful results.
+
+	The ORG directive won't work with LNK.
+
+SECTION		FB 04 word
+
+	Marks the start of a subsection, or goes back a subsection which
+had been left earlier. The word is as defined by the DEFINE directive,
+see below.
+
+OFFSET		FB 05 longword
+
+	Resets the output address to some positive offset from the start
+of the current subsection or absolute section. So FB 05 00 00 00 00 will
+go back and start the module over; however, the previously generated
+code is not deleted unless you specify something to replace it with,
+when it is overwritten.
+
+XDEF		FB 06 symbol longword word
+
+	Defines a symbol as having the value given by the longword plus
+the start of the subsection defined by the word ID (see DEFINE below.)
+If the ID is 0 then the symbol simply has the value of the longword.
+
+XREF		FB 07 longword byte [ operator word ... ] FB
+
+	Generates code for an external reference. The value to be output
+is built up from the longword with the values of symbols and addresses
+of subsections added to it.
+
+The byte is formatted as follows:
+
+	bits 0-2	Size to output (1, 2 or 4)
+	bit 3		Signed output (affects range checking)
+	bit 4		Unsigned output (affects range checking)
+	bit 5		PC relative (i.e. subtract current address)
+	bit 6		Relocate longword (put address into relocation
+			table.)
+	bit 7		Should be 0
+
+If bit 6 is set for a longword then it will have the base of the program
+added to it at runtime, assuming the correct relocation code is included
+in the program. The precise format use depends on the linker; the GST
+linker produces a rather bloated table, ld is better but could be
+improved upon.
+
+Each operator is a '+' or '-' denoting addition or subtraction of the
+following word ID. If the ID refers to a symbol, its value is added or
+subtracted; if it refers to a subsection then the start of that
+subsection is added or substracted.
+
+If the ID is 0 then the current address is added or subtracted. The list
+of operations is terminated by an FB.
+
+DEFINE		FB 10 word symbol
+
+	Defines an ID word. If the word has a positive value, the symbol
+is taken to be an external symbol; if it is negative then it refers to a
+subsection which is, of course, local.
+
+Do not use one ID to refer to two symbols/sections or two IDs to refer
+to a single symbol/section.
+
+COMMON		FB 12 word
+
+	This is identical to the SECTION directive except that the
+section is a common section. Within one module, there is no difference,
+but all subsections of a common section start at the same address. There
+is presumably a good reason for this.
+
+	Note that the -c option of LNK slightly alters the concept of
+common sections.
+
+END		FB 13
+
+	Marks the end of a module.
+
+FB		FB FB
+
+	Equivalent to the data byte FB, which you can't have because it
+is used to introduce a directive.
+
+There are a number of restrictions on the order in which directives may
+appear; basically, you must follow the principle of 'declare before use'
+--- a DEFINE directive for a given ID must precede its first use in an
+XDEF, XREF, SECTION or COMMON directive.
+
+Also, no data bytes or OFFSET or XREF directives may appear before the
+first ORG, SECTION or COMMON directive.
+
+A library consists of a sequence of modules appended end-to-end in a
+file. Since Ql linkers only make a single pass of libraries, the
+ordering of modules within libraries is rather important.
+
+------------------------------------------------------------------------
+
+See also 'readme_txt' and 'rtm_txt'.
+
+------------------------------------------------------------------------
+
+29/7/1993 RJK
+

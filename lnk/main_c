@@ -1,0 +1,373 @@
+/*
+ * Linker
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+#include	"lnk.h"
+#include	<string.h>
+#include	<stdlib.h>
+#include	<qdos.h>
+#include	<fcntl.h>
+
+#define MDEBUG
+
+#if defined CC || defined XCC
+# define ANYCC
+#endif
+
+char _version[] = "1.1";
+char _copyright[] = "(c) 1993 RJK";
+int _stack = 16000;
+struct WINDOWDEF _condetails = { 2,1,0,7,484,185,14,50 };
+void cmdexpand();
+void (*_cmdwildcard)() = cmdexpand;
+void consetup_title();
+void (*_consetup)() = consetup_title;
+
+static void usage(void);
+#ifndef CC
+static FILE *pathopen(char *, char *);
+static char *buildname(char [], char *, char *);
+#endif
+
+static struct input {
+	struct input *next;
+	int type;
+#ifdef ANYCC
+	int temped;
+#endif
+	char *name;
+	char *oname;
+} *ilist;
+
+static struct lpath {
+	struct lpath *next;
+	char *path;
+} *plist;
+
+#ifndef CC
+static char pobuffer[128];
+#endif
+#ifdef MDEBUG
+static char Mflag;
+#endif
+
+#ifdef ANYCC
+# include "ccusage.c"
+#else
+# include "lnkusage.c"
+#endif
+
+int main(int argc, char **argv)
+{
+	int i;
+	char *startup, *output, *stdlib, *stdrtm;
+	struct input **ipp = &ilist, *ip;
+	struct lpath **lpp = &plist, *lp;
+	int returncode = 0;
+	char *p;
+#ifndef CC
+	FILE *fp;
+	char xstack = 0;
+#endif
+#ifdef ANYCC
+	struct phase_opt **opt_pp = &opt_list, *opt_p;
+	char cpping = 1, c68ing = 1, as68ing = 1, macing = 1, linking = 1;
+	char *cpp_prog, *c_prog, *as_prog, *mac_prog;
+#ifdef CC
+	char *ld_prog;
+#endif
+	
+	if(!(c68path = getenv("C68PATH")))
+		if(!(c68path = getenv("PATH")))
+			if(!(c68path = getenv("PROG_USE")))
+				c68path = "flp1_";
+	if(!(tmppath = getenv("CC_TMP")))
+		if(!(tmppath = getenv("TMP")))
+			if(!(tmppath = getenv("TEMP")))
+				tmppath = "";
+	if(!(cpp_prog = getenv("CC_CPP")))
+		if(!(cpp_prog = getenv("CPP")))
+			cpp_prog = "cpp";
+	if(!(c_prog = getenv("CC_C")))
+		c_prog = "c68";
+	if(!(as_prog = getenv("CC_AS")))
+		if(!(as_prog = getenv("AS")))
+			as_prog = "as68";
+	if(!(mac_prog = getenv("CC_QMAC")))
+		mac_prog = "mac";
+#ifdef CC
+	if(!(ld_prog = getenv("CC_LD")))
+		if(!(ld_prog = getenv("LD"))) {
+			extern char *cclinker;
+			ld_prog = cclinker;
+			cclinker[((short *)cclinker)[-1]] = 0;
+		}
+#endif
+#endif
+
+#ifndef CC
+	if((p = getenv("LNK_REL")) && *p)
+		alwaysrel = 0;
+	if((p = getenv("LNK_LONG")) && *p)
+		rounding = 4;
+	if((p = getenv("LNK_GST")) && *p)
+		reltab = 2;
+	if((p = getenv("LNK_CASE")) && *p)
+		caseind = 0;
+#endif
+
+#ifndef CC
+	if(!(output = getenv("LNK_OUTPUT")) || !*output)
+		output = "a_out";
+#else
+	output = NULL;
+#endif
+	if(!(startup = getenv("LNK_STARTUP")))
+		startup = "crt_o";
+	if(!(stdlib = getenv("LNK_STDLIB")))
+		stdlib = "c";
+	if(!(stdrtm = getenv("LNK_STDRTM")))
+		stdrtm = "c";
+
+#ifndef ANYCC
+	printf("%s %s (c) 1993 Richard Kettlewell\n", _prog_name, _version);
+#endif
+	for(i = 1; i < argc; i++) {
+		if(argv[i][0] == '-') {
+#ifdef ANYCC 
+			int j;
+
+			for(j = 0; j < OPTIONS; j++)
+				if(!(options[j].prefix
+					? strncmp(options[j].name, argv[i], strlen(options[j].name))
+					: strcmp(options[j].name, argv[i])))
+					break;
+			if(j < OPTIONS) {
+#ifdef XCC
+				if(options[j].type == 3)
+					fprintf(stderr, "Obsolete option '%s\n", argv[i]);
+#endif
+				*opt_pp = opt_p = safe_malloc(sizeof *opt_p);
+				opt_pp = &opt_p->next;
+				opt_p->type = options[j].type;
+				opt_p->path = argv[i];
+			}
+#else
+			if(!strncmp(argv[i], "-buf", (size_t)4))
+				fprintf(stderr, "Obsolete option '%s'\n", argv[i]);
+#endif
+			else {
+				int c;
+
+				p = argv[i]+1;
+				while(c = *p++) switch(c) {
+#ifndef ANYCC
+					case 's':
+					case 'u':
+#endif
+					case 'l':
+					case 'o':
+					case 'r':
+					case 'L':
+#ifndef CC
+					case 'S':
+#endif
+#ifdef ANYCC
+					case 'Q':
+					case 'g':
+#endif
+						if(!*p) {
+							if(++i >= argc) {
+								fprintf(stderr, "Argument to -%c missing\n", c);
+								return -15;
+							}
+							p = argv[i];
+						}
+						switch(c) {
+#ifndef ANYCC
+							case 'u':
+								if(strlen(p) > NAMELENGTH) {
+									fprintf(stderr, "Symbol name %s too long\n", p);
+									return -15;
+								}
+								symbol(p, 0);
+								break;
+							case 's':
+								startup = p;
+								break;
+#endif
+#ifndef CC
+							case 'S':
+								xstack = 1;
+								stacksize = atol(p);
+								break;
+#endif
+							case 'l':
+							case 'r':
+								*ipp = ip = safe_malloc(sizeof *ip);
+								ipp = &ip->next;
+								ip->type = c == 'l' ? I_LIBRARY : I_RTM;
+								ip->oname = ip->name = p;
+								break;
+							case 'o':
+								output = p;
+								break;
+							case 'L':
+								*lpp = lp = safe_malloc(sizeof *lp);
+								lpp = &lp->next;
+								lp->path = p;
+								break;
+#ifdef ANYCC
+							case 'Q':
+								/* -Q... is special because the 'Q'
+								 * is removed */
+								*opt_pp = opt_p = safe_malloc(sizeof *opt_p);
+								opt_pp = &opt_p->next;
+								opt_p->type = c;
+								opt_p->path = p;
+								break;
+							case 'g':
+								c68path = p;
+								break;
+#endif
+						}
+						goto escape;
+	
+					case 'm': map = 1; if(*p == 's') { sym = 1; p++; } break;
+					case 'h': usage(); return 0;
+#ifndef CC
+					case 'A': common_start = -32768; break;
+					case 'N': startup = ""; stdlib = ""; stdrtm = ""; break;
+					case 'R': stdrtm = ""; break;
+					case 'X': stdlib = ""; break;
+					case 'C': startup = ""; break;
+					case 'D': dottrans = 1; break;
+					case 'Y': Yflag = 1; break;
+					case 'Z': Zflag = 1; break;
+#endif
+#ifdef MDEBUG
+					case 'M': Mflag = 1; break;
+#endif
+#ifndef ANYCC
+					case 'a': alwaysrel = 0; break;
+					case 'b': rounding = 4; break;
+					case 'c': falsecommon = 1; break;
+					case 'd': reltab = 1; break;
+					case 'g': reltab = 2; break;
+					case 'i': caseind = 1; break;
+					case 'n': caseind = 0; break;
+					case 't': msfile = stdout; break;
+					case 'v': verbose = 1; break;
+					case 'x': xflag = 1; break;
+					case 'y': yflag = 1; break;
+					case 'z': zflag = 1; break;
+#else
+					case 'v': ccverbose = 1; break;
+					case 'p': cpping = 1; c68ing = as68ing = macing = linking = 0; break;
+					case 's': cpping = c68ing = 1; as68ing = macing = linking = 0; break;
+					case 'c': cpping = c68ing = macing = as68ing = 1; linking = 0; break;
+#endif
+					default:
+						fprintf(stderr, "Unknown option -%c\n", c);
+						return -15;
+				}
+			}
+		} else {
+			*ipp = ip = safe_malloc(sizeof *ip);
+			ipp = &ip->next;
+			ip->type = I_MODULE;
+#ifdef ANYCC
+			ip->temped = 0;
+#endif
+			ip->oname = ip->name = argv[i];
+		}
+escape:
+		;
+	}
+
+	if(ilist == NULL) {
+		fputs("Nothing to do\n", stderr);
+		return 2;
+	}
+
+	*ipp = NULL;
+	*lpp = NULL;
+
+#ifdef ANYCC
+# include "ccmain.c"
+#endif
+
+#ifndef CC
+# include "lnkmain.c"
+#endif
+}
+
+#ifndef CC
+/*
+ * Look for a library
+ */
+static FILE *pathopen(char *name, char *ext)
+{
+	FILE *fp;
+	char *p;
+	struct lpath *lp;
+
+	pobuffer[0] = 0;
+	buildname(pobuffer, name, ext);
+	if(fp = fopen(pobuffer, "rb"))
+		return fp;
+	for(lp = plist; lp; lp = lp->next) {
+		strcpy(pobuffer, lp->path);
+		buildname(pobuffer, name, ext);
+		if(fp = fopen(pobuffer, "rb"))
+			return fp;
+	}
+	if(!(p = getenv("LIB"))) {
+		strcpy(pobuffer, getenv("PROG_USE"));
+		strcat(pobuffer, "lib_");
+	} else
+		strcpy(pobuffer, p);
+	buildname(pobuffer, name, ext);
+	if(fp = fopen(pobuffer, "rb"))
+		return fp;
+	if(p = getenv("PROG_USE")) {
+		strcpy(pobuffer, p);
+		buildname(pobuffer, name, ext);
+		if(fp = fopen(pobuffer, "rb"))
+			return fp;
+	} else {
+		/* try 'raw' name */
+		if(ext)
+			return pathopen(name, NULL);
+		return NULL;
+	}
+}
+
+static char *buildname(char ptr[], char *name, char *ext)
+{
+	if(ext)
+		strcat(ptr, "lib");
+	strcat(ptr, name);
+	if(ext)
+		strcat(ptr, ext);
+	return ptr;
+}
+#endif
+
+void *safe_malloc(size_t bytes)
+{
+	void *p;
+
+#ifdef MDEBUG
+	if(Mflag)
+		fprintf(stderr, "safe_malloc(%ul)\n", (unsigned long)bytes);
+#endif
+	if(!bytes)
+		return NULL;
+	if(p = malloc(bytes))
+		return p;
+	fputs("Out of memory\n", stderr);
+	exit(-3);
+}

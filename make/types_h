@@ -1,0 +1,64 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* type declarations */
+
+struct target {
+	struct target *left,*right;			/* Binary tree links */
+	char *name;							/* Target name */
+	struct target *primary;				/* Corresponding primary output */
+	struct dset *depend;				/* List of dependent lists */
+	struct dset *current;				/* Current last dependent list */
+	struct command *command;			/* Commands if no dependents */
+	char remake;						/* Remake this? */
+	char gotdate;						/* Got update date yet? */
+	char visiting;						/* Visiting this target? */
+	unsigned long date;					/* Update date */
+};
+
+struct dset {
+	struct dset *next;					/* Next dependent list */
+	struct depend *depend;				/* Actual dependent list */
+	struct command *command;			/* Commands for this list */
+	char changed;						/* True if this dependent list changed */
+};
+
+struct depend {
+	struct depend *next;				/* Next dependent list entry */
+	struct target *target;				/* Target on which we are depending */
+	char changed;						/* True if this target changed */
+};
+
+struct command {
+	struct command *next;
+	char *command;
+	char ignore;
+	char quiet;
+};
+
+/* templates used to be called rules which is why you keep seeing
+ * 'struct template *r' all over the place */
+struct template {
+	struct template *next;
+	char from[16],to[16];				/* Two extensions */
+	struct command *command;
+};
+
+typedef struct line {
+	char *text;							/* Text of line */
+	int length;							/* Length of text */
+	int size;							/* Length of buffer */
+} Line[1];								/* Lines passed as variable args */

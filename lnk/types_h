@@ -1,0 +1,94 @@
+/*
+ * LNK definitions which, when changed, need everything to be recompiled
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+
+/* remove the next 2 lines if your linker does case independent symbol comprison: */
+#define Yflag c_yflag
+#define Zflag c_zflag
+
+#define NAMELENGTH			32			/* Maximum length of a symbol name */
+#define HASHES				128			/* Distinct hash codes used */
+#define INPUT_BIGENDIAN		1			/* Read bigendian SROFF */
+#define OUTPUT_BIGENDIAN	1			/* Generate bigendian code */
+#define OUTPUT_ALIGN		1			/* Generated aligned output */
+#define WORDREL				0			/* Relocate 16 bit XREFs, not 32 bit */
+#define FASTEST				0			/* 1: Faster LNK */
+										/* 0: Smaller LNK */
+
+/*
+ * Each symbol has a definition as follows; it may be marked as undefined,
+ * in which case it will have to become defined for the link to succeed.
+ * See sym_c for discussion of the symbol table structure
+ */
+struct Symbol {
+	Symbol *next;						/* Next symbol in hash chain */
+	Module *module;						/* Defining module */
+	char name[NAMELENGTH+1];			/* Name of symbol */
+	char undefined;						/* True if undefined (see sym_c) */
+	char external;						/* True if external */
+	char used;							/* True if used outside defining module */
+	Subsection *base;					/* Base value or NULL */
+	long offset;						/* Added value */
+	Xref *relchain;						/* Relocation chain for externals */
+};
+
+/*
+ * Each section is broken into subsections; a subsection is the intersection
+ * of a modules contribution to the link with that of a section.
+ */
+struct Subsection {
+	Subsection *next;					/* Next subsection in section */
+	Section *section;					/* Section which this belongs too */
+	Subsection *nextm;					/* Next subsection in module */
+	Module *module;						/* Module from this is contributed */
+	long offset;						/* Offset of subsection (absolute) */
+	long length;						/* Length of subsection */
+	long pc;							/* Current position */
+	Byte *text;							/* Text of subsection */
+	Xref *xrefs;						/* List of xrefs */
+};
+
+struct Section {
+	Section *next;						/* Next section */
+	char name[NAMELENGTH+1];			/* Name of section */
+	Subsection *contents;				/* List of subsections */
+	long offset;						/* Offset of section */
+	long length;						/* Length of section */
+	int colwidth;						/* Width of column for listing */
+	char common;						/* 0: unknown 1: ordinary 2: common */
+};
+
+struct Module {
+	Module *next;						/* Next module */
+	char name[NAMELENGTH+1];			/* Name of module */
+	Subsection *contents;				/* List of subsections */
+};
+
+struct Term {
+	char op;							/* Operation '+' or '-' */
+	char sec;							/* True if add/subtract base of subsection */
+	union {
+		Symbol *sym;					/* Symbol to add/subtract */
+		Subsection *sec;				/* Subsection to add/subtract */
+	} u;
+};
+
+struct Xref {
+	Xref *next;							/* Next xref */
+	Xref *nexts;						/* Next xref in symbol relocation chain */
+	Byte *text;							/* Where to put result */
+	long offset;						/* Offset into file */
+	char rule;							/* Truncation rule */
+	long base;							/* Base for expression */
+	int terms;							/* Count of terms */
+	Term term[1];						/* Extra terms */
+};
+
+struct Relsym {
+	Relsym *links[2];					/* Binary tree of symbols to relocate for */
+	Symbol *sym;						/* Actual symbol */
+	Xref *relchain;						/* Chain of XREFs needing relocation */
+};
+

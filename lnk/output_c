@@ -1,0 +1,280 @@
+/*
+ * Linker --- output program
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+#include	"lnk.h"
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	<string.h>
+
+static void putlong(long, FILE *);
+static void mkxrel(Relsym *, FILE *);
+
+int write_program(FILE *fp)
+{
+	Section *sp;
+	Subsection *sbp;
+
+#ifdef DEBUG
+	fputs("write_program()\n", stderr);
+#endif
+	/* If you have non-DUMMY COMMON, you'll have to make changes here */
+	for(sp = sections; sp->next; sp = sp->next)
+		if(sp->common != 2)
+			for(sbp = sp->contents; sbp; sbp = sbp->next) {
+				size_t l = sbp->length;
+				if(sbp->text && l) {
+#ifdef DEBUG
+					fprintf(stderr, "[%08lx] Writing %s:%s\n", sbp->length, sp->name, sbp->module->name);
+#endif
+					if(l != fwrite(sbp->text, (size_t)1, l, fp)) {
+						fputs("Output error when writing program\n", stderr);
+						return 1;
+					}
+				} else if(l) {
+#ifdef DEBUG
+					fprintf(stderr, "[%08lx] Dummying %s:%s\n", l, sp->name, sbp->module->name);
+#endif
+					while(l--)
+						putc(0, fp);
+					if(ferror(fp)) {
+						fputs("Output error when writing program\n", stderr);
+						return 1;
+					}
+				}
+			}
+	return 0;
+}
+
+/*
+ * Write relocation table and external relocation table
+ * The GST table is a longword counting the number of entries,
+ * followed by the offset of each entry.
+ * The LD table is a longword for the first entry --- 0 for none ---
+ * followed by a series of bytes. Byte 0 terminates, byte 1 does
+ * a jump of 254 without relocating; any other byte does a jump
+ * of that size and relocates.
+ * This is small and simple, but we could get quite a bit smaller
+ * by taking advantage of the fact that relocations aren't required
+ * for odd addresses. But, for once, I'll stick to an established
+ * standard for a while...
+ * (Also, a relocation never takes place 2 bytes on from the last
+ * one. So you could still use 0 and 1 as the special values.)
+ *
+ * The external symbol table is a list of byte-length names,
+ * which are sorted and terminated by a byte 0. Each is followed
+ * by a relocation table of the style of the LD table, except
+ * that entries are 16 bit (not 8 bit) and a value 1 means
+ * add 65534 and not add 254. A word 0 still terminates.
+ * The table for each symbol is word aligned, though the
+ * whole table is not.
+ *
+ * I suggest you keep the system table of loaded names sorted
+ * and go through both tables in order; you will get all symbols
+ * in linear time that way, which is the information-theoretic
+ * bound i.e., can't be beaten.
+ *
+ * If you reach the end of the program's table, you've won; if
+ * you reach the end of the global table, you've lost and there
+ * are unresolved references remaining.
+ *
+ * See rtm_txt, rtm_asm etc.
+ */
+int write_reltab(FILE *fp)
+{
+	Section *sp;
+	Subsection *sbp;
+	Xref *xp;
+	long lastoffset = 0L;
+	long diff;
+	long offset;
+
+#ifdef DEBUG
+	fputs("write_reltab()\n", stderr);
+#endif
+	if(relocations == 0) {
+		putlong(0, fp);
+		goto done_rel_totally;
+	}
+	if(reltab == 2)
+		putlong(relocations, fp);
+	for(sp = sections; sp->next; sp = sp->next)
+		for(sbp = sp->contents; sbp; sbp = sbp->next)
+			for(xp = sbp->xrefs; xp; xp = xp->next)
+				if(xp->rule & 0x80) {
+					offset = xp->offset;
+					switch(reltab) {
+						case 1:	/* LD --- mucho hassle but good results */
+							if(!lastoffset)
+								putlong(offset, fp);
+							else {
+								diff = offset - lastoffset;
+								if(diff <= 1) {
+									/*
+									 * XREFs are supposed to be in
+									 * address order, but they can still
+									 * be arranged to overlap :-(
+									 */
+									fputs("Can't relocate\n", stderr);
+									exit(-19);
+								}
+								while(diff > 255) {
+									fputc(1, fp);
+									diff -= 254;
+								}
+#if FASTEST
+								putc(diff, fp);
+#else
+								fputc(diff, fp);
+#endif
+							}
+							break;
+						case 2: /* GST --- easy */
+							putlong(offset, fp);
+							break;
+					}
+					lastoffset = offset;
+					if(!--relocations)
+						goto done_rel;
+				}
+done_rel:
+	if(reltab == 1)
+		fputc(0, fp);
+done_rel_totally:
+	/*
+	 * Now write external symbol table
+	 * There's only 1 format for this, which is based on the LD format
+	 * for ordinary relocation BUT recognises that references to a
+	 * single external symbol are few and far between, and therefore
+	 * uses 16 bit codes. There's still no optimisation about
+	 * odd addresses and the like, since it will so rarely be
+	 * needed and anyway, it would slow the relocation pass down
+	 * even more.
+	 */
+	mkxrel(xrelsyms, fp);
+	fputc(0, fp);
+	/*
+	 * Further relocation tables made here as required
+	 */
+	return 0;
+}
+
+static void putlong(long l, FILE *fp)
+{
+#if (OUTPUT_BIGENDIAN && MACHINE_BIGENDIAN) || (!OUTPUT_BIGENDIAN && MACHINE_SMALLENDIAN)
+	Byte *lptr = (Byte *)&l;
+
+# if FASTEST
+	putc(*lptr++, fp);
+	putc(*lptr++, fp);
+	putc(*lptr++, fp);
+	putc(*lptr, fp);
+# else
+	fputc(*lptr++, fp);
+	fputc(*lptr++, fp);
+	fputc(*lptr++, fp);
+	fputc(*lptr, fp);
+# endif
+#else 
+	Byte x0, x1, x2, x3;
+
+	x0 = l;
+	x1 = l >>= 8;
+	x2 = l >>= 8;
+	x3 = l >> 8;
+# if OUTPUT_BIGENDIAN
+#  if FASTEST
+	putc(x3, fp);
+	putc(x2, fp);
+	putc(x1, fp);
+	putc(x0, fp);
+#  else
+	fputc(x3, fp);
+	fputc(x2, fp);
+	fputc(x1, fp);
+	fputc(x0, fp);
+#  endif
+# else
+#  if FASTEST
+	putc(x0, fp);
+	putc(x1, fp);
+	putc(x2, fp);
+	putc(x3, fp);
+#  else
+	fputc(x0, fp);
+	fputc(x1, fp);
+	fputc(x2, fp);
+	fputc(x3, fp);
+#  endif
+# endif
+#endif
+}
+
+/*
+ * Tree walker to produce external symbol table
+ */
+static void mkxrel(Relsym *rp, FILE *fp)
+{
+	Xref *xp;
+	long lastoffset = 0L;
+	long offset;
+	long diff;
+
+	if(!rp)
+		return;
+	mkxrel(rp->links[0], fp);
+#ifdef DEBUG
+	fprintf(stderr, "mkxrel(\"%s\");\n", rp->sym->name);
+#endif
+	fputc((int)strlen(rp->sym->name), fp);
+	fputs(rp->sym->name, fp);
+#if OUTPUT_ALIGN
+	if(ftell(fp) & 1)
+		fputc(0, fp);
+#endif
+	for(xp = rp->relchain; xp; xp = xp->nexts) {
+		offset = xp->offset;
+#ifdef DEBUG
+		fprintf(stderr, "XREL %08lX : %s\n", offset, rp->sym->name);
+#endif
+		if(!lastoffset)
+			putlong(offset, fp);
+		else {
+			if(offset - lastoffset <= 1) {
+				fputs("Can't relocate\n", stderr);
+				exit(-19);
+			}
+			diff = offset - lastoffset;
+			while(diff > 0xffff) {
+#if OUTPUT_BIGENDIAN
+				fputc(0, fp);
+				fputc(1, fp);
+#else
+				fputc(1, fp);
+				fputc(0, fp);
+#endif
+				diff -= 0xfffe;
+			}
+#if OUTPUT_BIGENDIAN
+			fputc(diff >> 8, fp);
+			fputc(diff, fp);
+#else
+			fputc(diff, fp);
+			fputc(diff >> 8, fp);
+#endif
+		}
+		lastoffset = offset;
+	}
+	if(!lastoffset) {
+		/*
+		 * If this happens, we are in *serious* trouble
+		 */
+		fputs("Internal (fatal) error building external symbol table\n", stderr);
+		exit(-19);
+	}
+	fputc(0, fp);
+	fputc(0, fp);
+	mkxrel(rp->links[1], fp);
+}

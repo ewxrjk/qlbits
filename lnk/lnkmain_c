@@ -1,0 +1,241 @@
+/*
+ * The main loop of the linker
+ * All file inclusion is done from here
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+
+	if(*startup)
+		if(!(fp = pathopen(startup, NULL))) {
+			fprintf(stderr, "Startup file %s not found\n", startup);
+			returncode = 1;
+		} else {
+			returncode |= load_contents(pobuffer, fp, I_MODULE) ? 1 : 0;
+			fclose(fp);
+		}
+
+#ifdef DEBUG
+	fprintf(stderr, "scan main list; returncode = %d\n", returncode);
+#endif
+
+	for(ip = ilist; ip; ip = ip->next) switch(ip->type) {
+		case I_MODULE:
+			if(!(fp = fopen(ip->name, "rb"))) {
+				fprintf(stderr, "Module file %s not found\n", ip->name);
+				returncode = 1;
+			} else {
+				returncode |= load_contents(ip->name, fp, I_MODULE) ? 1 : 0;
+				fclose(fp);
+#ifdef ANYCC
+				if(ip->temped)
+					unlink(ip->name);
+#endif
+			}
+			break;
+		case I_LIBRARY:
+			if(!(fp = pathopen(ip->name, "_a"))) {
+				fprintf(stderr, "Library lib%s_a not found\n", ip->name);
+				returncode = 1;
+			} else {
+				returncode |= load_contents(pobuffer, fp, I_LIBRARY) ? 1 : 0;
+				fclose(fp);
+			}
+			break;
+		case I_RTM:
+			if(!(fp = pathopen(ip->name, "_rtm"))) {
+				fprintf(stderr, "RTM definition lib%s_rtm not found\n", ip->name);
+				returncode = 1;
+			} else {
+				returncode |= load_contents(pobuffer, fp, I_RTM) ? 1 : 0;
+				fclose(fp);
+
+			}
+			break;
+		default:
+			fputs("AARGH! Internal error scanning file list\n", stderr);
+			return -1;
+	}
+
+#ifdef DEBUG
+	fprintf(stderr, "standard libraries; returncode = %d\n", returncode);
+#endif
+
+	if(*stdlib)
+		if(!(fp = pathopen(stdlib, "_a"))) {
+			fprintf(stderr, "Library lib%s_a not found\n", stdlib);
+			returncode = 1;
+		} else {
+			returncode |= load_contents(pobuffer, fp, I_LIBRARY) ? 1 : 0;
+			fclose(fp);
+		}
+	if(*stdrtm)
+		if(!(fp = pathopen(stdrtm, "_rtm"))) {
+			fprintf(stderr, "RTM description lib%s_rtm not found\n", stdrtm);
+			/* returncode = 1; */
+		} else {
+			returncode |= load_contents(pobuffer, fp, I_RTM) ? 1 : 0;
+			fclose(fp);
+		}
+
+#ifdef DEBUG
+	fprintf(stderr, "list undefined symbols; returncode = %d\n", returncode);
+#endif
+
+	if(undefined) {
+		/*
+		 * List undefined symbols.
+		 * Ideally, this list would be sorted but it's
+		 * just the console dump so it's not likely
+		 * to be mechanically processed. Therefore,
+		 * there's no really good reason for
+		 * sorting.
+		 */
+		for(i = 0; i < HASHES; i++) {
+			Symbol *sp;
+
+			for(sp = symbols[i]; sp; sp = sp->next)
+				if(sp->undefined)
+					fprintf(stderr, "Symbol %s undefined\n", sp->name);
+		}
+		returncode = 1;
+	}
+#ifdef DEBUG
+	fprintf(stderr, "resolve xrefs; returncode = %d\n", returncode);
+#endif
+
+	returncode |= resolve_xrefs() ? 1 : 0;
+
+#ifdef DEBUG
+	fprintf(stderr, "write program; returncode = %d\n", returncode);
+#endif
+
+	if(!(fp = fopen(output, "wb"))) {
+		fprintf(stderr, "Cannot open %s\n", output);
+		returncode = 1;
+		relsize = 0;
+	} else {
+		long rstart;
+		Section *sp;
+		Subsection *sbp;
+
+		returncode |= write_program(fp) ? 1 : 0;
+#ifdef DEBUG
+		fprintf(stderr, "wrote program; returncode = %d\n", returncode);
+#endif
+		rstart = ftell(fp);
+		returncode |= write_reltab(fp) ? 1 : 0;
+#ifdef DEBUG
+		fprintf(stderr, "wrote relocation table; returncode = %d\n", returncode);
+#endif
+		relsize = ftell(fp) - rstart;
+		while(relsize & (rounding - 1)) {	/* Let's be nice */
+			fputc(0, fp);
+			relsize++;
+		}
+		if(!zflag) {
+			struct qdirect qd;
+			int hdrfailure;
+
+			if(!xstack) {
+				sp = findsection("UDATA");
+				stacksize = 128 + (Yflag ? 0 : -relsize);	/* 128 bytes headroom */
+				if(yflag)
+					stacksize += commonsize;
+				else
+					for(sbp = sp->contents; sbp; sbp = sbp->next)
+						stacksize += sbp->length;
+				if(stacksize < 512)
+					stacksize = 512;				/* Make sure plenty of 'real' space */
+			}
+			hdrfailure = fs_headr(fgetchid(fp),  -1, &qd, sizeof qd) <= 0;
+			if(!hdrfailure) {
+				qd.d_type = 1;
+				qd.d_datalen = stacksize;
+				qd.d_reserved = 0;
+				hdrfailure = fs_heads(fgetchid(fp), -1, &qd, sizeof qd) <= 0;
+			}
+			if(hdrfailure) {
+				fprintf(stderr, "Error setting header for %s\n", output);
+				returncode = 1;
+			}
+		}
+		if(ferror(fp)) {
+			fprintf(stderr, "Error writing %s\n", output);
+			returncode = 1;
+		}
+		fclose(fp);
+	}
+
+#ifdef DEBUG
+	fprintf(stderr, "do -x; returncode = %d\n", returncode);
+#endif
+
+	if(xflag) {
+		char buf[FILENAME_MAX];
+
+		strcpy(buf, output);
+		strcat(buf, "_rtm");
+		if(!(fp = fopen(buf, "wb"))) {
+			fprintf(stderr, "Can't open %s\n", buf);
+			returncode = 1;
+		} else {
+			Section *sp;
+			Subsection *sbp;
+			
+			sp = findsection("RTM");
+			for(sbp = sp->contents; sbp; sbp = sbp->next) {
+				if(sbp->text)
+					fwrite(sbp->text, (size_t)1, (size_t)sbp->length, fp);
+				else {
+					for(i = sbp->length; i > 0; i--)
+						fputc(0, fp);
+				}
+			}
+			if(ferror(fp)) {
+				fprintf(stderr, "Error writing %s\n", buf);
+				returncode = 1;
+			}
+			fclose(fp);
+		}
+	}
+
+#ifdef DEBUG
+	fprintf(stderr, "do -m, -s; returncode = %d\n", returncode);
+#endif
+						
+	if(map || sym) {
+		char buf[FILENAME_MAX];
+		if(msfile)
+			fp = msfile;
+		else {
+			strcpy(buf, output);
+			strcat(buf, "_map");
+			if(!(fp = fopen(buf, "w")))
+				fprintf(stderr, "Cannot open %s\n", buf);
+		}
+		if(fp) {
+			fflush(stderr);
+			if(map)
+				big_map(fp);
+			if(map && sym)
+				little_map(fp);
+			else
+				little_map(stderr);
+			if(sym)
+				symbol_table(fp);
+			if(fp != stdout)
+				fclose(fp);
+			else
+				fflush(stdout);
+		} else
+			little_map(stderr);
+	} else
+		little_map(stderr);
+	if(verbose)
+		hash_stats();
+	if(returncode)
+		fputs("Link failed\n", stderr);
+	else
+		fputs("Link completed\n", stderr);
+	return returncode;
+

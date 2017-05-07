@@ -1,0 +1,34 @@
+100 REMark Create a module with the required section ordering
+110 REMark ---in the public domain---
+120 REMark
+130 REMark Only works for up to 255 sections (enough for me!)
+140 REMark To do COMMON sections, chr$(251) & chr$(4) below
+150 REMark should be chr$(251) & chr$(18)
+160 REMark
+170 RESTORE
+180 name$ = 'sections_o'
+190 c = FOP_OVER(name$)
+200 IF c >= 0 THEN
+210  p$ = CHR$(251)&CHR$(1)&CHR$(LEN(name$)) & name$
+220  a = 255
+230  REPeat loop
+240   IF EOF THEN EXIT loop
+250   READ a$
+260   x$ = ''
+270   x$ = CHR$(251) & CHR$(16) & CHR$(255) & CHR$(a)
+280   x$ = x$ & (CHR$(LEN(a$)) & a$)
+290   x$ = x$ & (CHR$(251) & CHR$(4) & CHR$(255) & CHR$(a))
+300   p$ = p$ & x$
+310   a = a - 1
+320  END REPeat loop
+330  PRINT#c;p$ & (CHR$(251) & CHR$(19));
+340  CLOSE#c
+350 END IF
+360 :
+370 REMark Up to 255 section names
+380 :
+390 DATA 'TEXT','DATA','UDATA'
+400 :
+410 DEFine PROCedure sv
+420  SAVE_O flp2_lnk_sections_bas
+430 END DEFine

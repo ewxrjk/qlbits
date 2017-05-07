@@ -1,0 +1,182 @@
+------------------------------------------------------------------------
+
+                         MAKE Revision History
+
+------------------------------------------------------------------------
+
+This revision history is listed with the most recent version first.
+
+Version 2.1 29/6/1993, 30/6/1993, 28/7/1993
+
+-	Redesigned the make algorithm. See appendix B for details.
+	This involves changes to many parts of the program.
+
+-	Improved command line handling. Changed some of the options so
+	that they are more like Unix Make (though differences remain.)
+
+-	Added Bison and Flex templates. They're parameterised enough to
+	work with equivalent programs?
+
+-	Modified analyse_c so that we use a big array to check whether a
+	character is allowed to be part of a filename.
+
+-	Cosmetic changes to the manual.
+
+-	Lines from the input may now be any length before and after
+	macro-expansion. Guess what, I only got around to this after a
+	Makefile I use expanded some macros to line longer than the
+	buffer size at the time and gave bizarre results.
+
+-	Modified decide() and the part of main() that calls decide() to
+	ensure that remakes are picked up correctly: if a target has a
+	dependent target which is to be remade, then the target itself
+	should be remade. Multiple targets on the command line may
+	require several passes.
+
+-	Minor hacks on command line definition of macros.
+
+Version 2.02, 2.02a 20/6/1993, 26/6/1993, 27/6/1993
+
+-	Don't try and execute directories: much hacking of system_c.
+
+-	Altered what characters MAKE thinks filenames are made up of.
+	They are now any non-space character apart from ':', '=' or '-'.
+	This is the kind of thing I may mess around with in later
+	versions.
+
+-	Changed the manual a bit
+
+-	If you use -n, then all commands are listed even if they are
+	marked as 'quiet' with the '@' prefix.
+
+-	Changed some of the standard macros to be more like other Make
+	programs. That should break quite a few people's Make files
+	(most of mine...)
+
+-	Took memory functions out of -ltools into memory_c.
+
+Version 2.01 6/4/1993, 11/4/1993
+
+2.0 was full of bugs:
+
+-	Removed the bug in the analyse_c inputcommands() function that
+	means only the last command in a sequence of commands attached
+	to a rule or template is recognised.
+
+	(Rather irritating. I'd discovered this shortly after sending
+	out three copies...)
+
+-	Removed a further bug here relating to 'quiet' and 'ignore'
+	modes.
+
+-	Updated the _x_o template to preprocess assembler source. This
+	template uses a temporary file on $(TMP) to keep the
+	intermediate file which will not be deleted if an error stops
+	the make. But, it will get overwritten and then deleted when you
+	removed the bugs from your source.
+
+	The handler for this should really be in CC, but the version I
+	have doesn't get it quite right. Maybe fixed now?
+
+-	If you had (say) two _x_o targets then things went horribly
+	wrong because the first one would create the _x target, and
+	then decide it wasn't worth using; the second one would find
+	it already created and therefore assume that it was good to use:
+	disaster. Fixed.
+
+-	Added automake (-x) feature. Any use to anyone?
+
+Version 2.0 28/3/1993, 29/3/1993, 31/3/1993
+
+A major rewrite:
+
+-	Removed the line splitting feature. You can no longer choose
+	which characters to use for comments etc (was silly) and the
+	quiet/ignore error characters have swapped around to give more
+	standard usage. (Oops!)
+
+-	You can now specify multiple targets in one rule.
+
+-	Ql Make is now easier to port to other systems than the Ql
+	thanks to the #defines in make_h. To reduce unnecessary re-makes
+	I split some of make_h into types_h, and some of main_c into
+	globals_c.
+
+	system_c is still very Ql-dependent.
+
+-	Language dependent strings are now in a separate file. Just
+	alter the makefile and do a make to change language. Currently
+	only English supported.
+
+-	Got quiet and ignore stuff done properly this time.
+
+-	$$ now becomes $ like it's meant to.
+
+-	Other minor changes arising from re-write. For example, the
+	source occupies several more files which leads to a greater
+	degree of modularity. Updated manual.
+
+-	Turned this update list upside down. I think the most recent
+	changes are probably what you want to see first!
+
+-	Got rid of my old copyright message and replaced it with the one
+	suggested by FSF. N.B., there is a GNU Make program which is
+	nothing to do with this one. (It's rather big.)
+
+Version 1.21 27/3/1993
+
+-	Tidied up analyse_c to be more flexible about macro names and
+	filenames and to reduce code duplication.
+
+-	Accidentally deleted source... Retrieved some by trawling slave
+	blocks (boring!). Tried to use a disk recovery program to get
+	some more back but went and unzipped it onto the disk I was
+	trying to recover from. Thus overwriting all the stuff I was
+	hoping to recover.
+
+	I'll rewrite it and call it version 2.
+
+	Today wasn't all bad, Cambridge won the boat race :-)
+
+Version 1.2 19/3/1993
+
+-	Changed treatment of templates to remove bugs relating to chains
+	of template driven makes.
+
+-	Added stuff to deal with secondary outputs and multiple
+
+-	Altered expandmacros() to cope with stuff relating to multiple
+	dependent lists.
+
+-	Macros no longer required brackets even if their names are many
+	characters long, though brackets may be required to eliminate
+	ambiguity. Ambiguity to humans, that is. :-)
+
+-	Renamed what I previously called rules as templates so that I
+	can call 'normal' things rules! Unix Make calls them "inference
+	rules" which is quite sensible.
+
+-	Piles of other changes, small and large. Sorry I haven't listed
+	them.
+
+Version 1.11 20/7/1992
+
+-	Removed bug relating to ignoring of errors. Removed automatic
+	wildcard vector; such a feature is inappropriate to a make
+	program.
+
+Version 1.1 17/7/1992
+
+-	Adapted to use ANSI style function prototypes.
+
+-	Took advantage of C68 3.01 features such as automatic wildcard
+	expansion and tidier window.
+
+Version 1.01 14/3/1992
+
+-	Removed a feature which turned out to be less useful than I
+	thought. (By mid-1993 can't even remember what it was...)
+
+Version 1.0 19/1/1992
+
+-

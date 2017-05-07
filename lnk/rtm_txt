@@ -1,0 +1,339 @@
+------------------------------------------------------------------------
+
+                         Runtime Module Manager
+
+------------------------------------------------------------------------
+
+                            Shared Libraries
+
+------------------------------------------------------------------------
+
+The LNK linker supports the concept of the 'shared libraries' or
+'runtime module' --- RTM for short --- using the following features:
+
+	(i)	-r option to scan an RTM definition file for external
+		symbols,
+	(ii)	-x option output section RTM to a file,
+	(iii)	Extended relocation table.
+
+The idea is simple: code that is used in several different programs
+should appear only once in memory. For example, in C the code to do the
+work behind the printf() and scanf() functions could be stored in memory
+permanently instead of being duplicated in each individual program.
+
+While this takes up slightly more memory than otherwise if you are only
+running one program, as soon as you load a second one which uses the
+same code you start to gain. You also gain in terms of disk space.
+
+Note that to use RTMs succesfully, you must link code with LNK as
+opposed to LD or the GST linker, and when you run the programs generated
+you must have rtm_rext and the appropriate RTMs installed.
+
+Warning: if the code in an RTM alters a fixed address then you will
+probably have a disaster. The output from (current versions of) C68
+causes particular problems here.
+
+------------------------------------------------------------------------
+
+                                 Files
+
+------------------------------------------------------------------------
+
+I have written a suitable RTM manager and the associated code necessary
+to make the whole system go:
+
+	rtm_rext
+	rtm_asm
+		The RTM manager. You load rtm_rext with LRESPR, or
+		equivalent, to keep track of all the RTM symbols.
+
+	insrtm_rel
+	insrtm_asm
+		The RTM installation routine. You link this with your
+		own code using LNK's -c option to create individual
+		RTMs.
+
+	libdemo
+	libdem2
+	libdemo_rtm
+	libdem2_rtm
+	usedemo
+	demo_asm
+	dem2_asm
+	usedemo_asm
+		Demonstration code
+
+	ncrt_o
+	ncrt_s
+		LNK compatible startup for C68 programs
+		(the original crt_o is good too, but this works with
+		RTMs.)
+
+	rtm_txt
+		This file
+
+All of these files are part of the LNK package and should not be
+distributed separately from it, except as mentioned in the copyright
+message in readme_txt. The ncrt_s/ncrt_o doesn't require rtm_rext to be
+installed, though if you want to run a program which uses RTMs then
+rtm_rext and the appropriate library(s) MUST be installed.
+
+------------------------------------------------------------------------
+
+                                rtm_rext
+
+------------------------------------------------------------------------
+
+Examples: see insrtm_asm, usedemo_asm, ncrt_s
+Further info: see rtm_asm
+
+
+Concepts
+
+The file rtm_rext is the runtime module manager itself. It is installed
+with LRESPR, or equivalently, RESPR followed by LBYTES and CALL. On
+loading, it displays a version number and copyright message.
+
+It also installs a resident procedure, RTM_LIST, and the RTM manager,
+which is implemented as a fake device so that application programs may
+find it; it is impossible to open a channel to this device, even by
+accident.
+
+The key elements of any RTM are symbols; each is a name associated with
+a block of code. The application program specifies which symbols it
+needs, and the RTM manager inserts their values into its code when it is
+executed.
+
+Symbols are divided into sets called name spaces; within a name space,
+no two symbols can have the same name, though there may be symbols of
+the same name in different name spaces. This type of strategy is rather
+necessary; for example, imagine the problem of two different C compilers
+which had different calling conventions (e.g. they pushed parameters
+onto the stack in different orders). This is solved by putting the code
+for each in a different name space.
+
+The name space used for routines to be called from the output of the C68
+compiler is just 'C68'.
+
+Within a name space, the symbols are sorted according to ASCII ordering;
+this allows the relocation to be done in linear time, which can't be
+improved upon.
+
+
+RTM_LIST
+
+You use the RTM_LIST command to list name spaces, or to list the
+contents of a name space:
+
+	RTM_LIST[#channel]
+	RTM_LIST[#channel,]name
+
+If no name is given then the list of name spaces is printed; otherwise
+the contents of the specified name space are printed. If no channel is
+specified then #1 is assumed.
+
+The list of name spaces is not sorted; the list of the contents of each
+name space is sorted.
+
+
+Installing an RTM
+
+RTMs may be loaded with LRESPR; if they cause a clash with existing
+symbols then you will get the error 'already exists'. If this happens
+then you're stuck, really; some of the names may have been added and
+others may not.
+
+The idea is that you install all the RTMs you'll use right at the start
+of a session --- i.e. in your BOOT file --- and don't mess around with
+it once you've got it working.
+
+Note that rtm_rext must have been installed BEFORE you attempt to
+install any RTMs.
+
+
+Low Level Details
+
+At present, the best documentation for low-level use of rtm_rext is to
+be found in 'ncrt_s', 'insrtm_asm' and 'usedemo_asm'; these files
+demonstrate three slightly different ways of working with it. You should
+adapt them to your own purposes.
+
+ncrt_s attempts to call rtm_rext, but if it isn't there then it does
+what relocation it can anyway; if there are external symbols then it
+obviously can't do anything without rtm_rext, though.
+
+insrtm_asm should be assembled and linked with code to be placed in
+RTMs, which should contain tables of the form found in demo_asm and
+dem2_asm (though dem2_asm is rather trivial.)
+
+It is *important* that all calls to rtm_rext are made in user mode.
+
+usedemo_asm demonstrates code which actually calls the routines defined
+in demo_asm and dem2_asm; once you have assembled and linked everything
+as in the Makefile, you could use the following SuperBASIC commands to
+test it:
+
+	LRESPR rtm_rext
+	LRESPR libdemo
+	LRESPR libdem2
+	EXEC usedemo
+
+...though you may need to add device names if your program and data
+directories aren't the same. The demo doesn't do anything very useful:
+such programs seldom do.
+
+------------------------------------------------------------------------
+
+                         Constructing a New RTM
+
+------------------------------------------------------------------------
+
+Examples: see demo_asm, dem2_asm.
+
+Once you have decided which symbols to put into the RTM, and which name
+space to use, you have to construct a table file. This must XDEF the
+symbol .RTMDEF, which points to the base of the RTM table, and must also
+contain an RTM definition in section RTM.
+
+The RTM table is used to add symbols to a name space. It begins with 2
+longwords of 0, followed by the name of the name space to use. Like ALL
+strings in the RTM system, this string consists of a byte for the length
+followed by the characters of the string.
+
+There then follow one entry per symbol; each entry is aligned to an even
+address, and consists of a longword of 0 followed by the address of the
+code. If you use insrtm_rel, or similar code, then you can just use
+
+	dc.l name
+
+here since it will be correctly relocated. (Even if you have the old
+version of the GST assembler, which didn't set the relocation bit when
+it was supposed to, this will still work: LNK can work out when to
+relocate without extra hints, unless you actually tell it not to.)
+
+Following this address is a string (again, byte length) containing the
+name of the symbol. Note that this table MUST be sorted by the ASCII
+value of the symbols.
+
+Finally, at the end of the table there are two longwords (as ever,
+aligned to an even address) of zero. The GST assembler will
+automatically make sure that everything that should be aligned is.
+
+The RTM definition must appear in section RTM, and there must be nothing
+else in that section. It simply consists of the list of symbol names ---
+in any order at the moment, though I strongly recommend that you put
+them in the same order as they appeared in the RTM table --- each in the
+form of a byte length string. There is no alignment required.
+
+A zero byte terminates the list.
+
+When you've got all this working, you link it as follows:
+
+	lnk -zxN -s insrtm_rel -o libfred fred_o ...
+i.e.
+	ex lnk;'-zxN -s insrtm_rel -o libfred fred_o ...'
+or
+	ew lnk,#1;'-zxN -s insrtm_rel -o libfred fred_o ...'
+
+...where 'fred' is the name of the library. This will generate 'libfred'
+from your files, using insrtm_rel as a startup file, and also generate
+the RTM definitin 'libfred_rtm' for future scanning by LNK.
+
+The -z flag is a convenience to set the right filetype (0) and dataspace
+(again 0); -x is used to generate libfred_rtm from section RTM. -N stops
+the 'standard' libraries being scanned, and the -s flag forces
+insrtm_rel to be the startup file, instead of crt_o; it will be found
+either in your standard library directory, or in the current data
+directory. (More on searching for startup files and libraries may be
+found in lnk_txt.)
+
+-o simply specifies the output name; 'fred_o ...' should be replaced by
+the list of files to include in the link.
+
+As a new feature, you can now arrange for a message to be written to
+channel 0 when the library is installed. In a section called RTMNAME,
+put the following:
+
+	section	RTMNAME
+	dc.w	$4afb
+	dc.w	length
+	dc.b	text
+
+Put no other code or data in this section. (libdemo uses this; libdem2
+doesn't.)
+
+------------------------------------------------------------------------
+
+                              Code Purity
+
+------------------------------------------------------------------------
+
+An important issue on the Ql is the extent to which programs are 'pure'.
+The generally accepted definition seems to be that a program is pure if
+it can be executed within ROM, and that multiple copies of the same
+program can be run using only one copy of the data. (The one condition
+generally implies the other.)
+
+It seems unlikely that C programs will ever be pure, and programs that
+use this (or almost any other) runtime module scheme will have the same
+problem.
+
+However, all is not lost; while ROMmability is extremely hard indeed
+(you would have to relocate the program to a specific address before it
+executed, and include all the RTMs in ROM as well) it is possible to
+arrange for code-sharing.
+
+To do this, you must ensure that all variable data is kept at offsets
+from an address register (traditionally A6, though C people may prefer
+to use A5 for this purpose and retain A6 as a frame pointer.) and that
+relocation occurs only once. This will obviously do the trick.
+
+To ensure that relocation occurs exactly once (zero times is a bad
+idea!) you would probably use code like this:
+	
+	section	TEXT
+_progbase:
+	bra.s	Lstart
+	ds.b	6-(*-_progbase)
+	dc.w	$4afb
+	dc.w	6
+	dc.b	'C_PROG'
+	...any more of job header...
+Lstart:
+	trap	#0
+	move.l	#Lrelflag-_progbase,a0
+	lea	_progbase(pc,d0.l),a0
+	bset	#7,(a0)
+	and.w	#$dfff,sr
+	bne	Lrelocated
+	...relocate as normal, probably through rtm_rext...
+	...finished relocating...
+Lrelocated:
+	...rest of startup code...
+	section	DATA
+Lrelflag:
+	dc.b	0
+	...
+
+This relies on the property of BSET that it tests the bit being
+addressed before changing it. I would use TAS but that doesn't work on
+the Amiga (and therefore should be considered suspect for all 68000
+based machines.) The following AND instruction doesn't change CCR so the
+branch instruction is correct.
+
+Note that the code above makes sure that the cpu is in USER mode when
+the relocation takes place; if rtm_rext is used for relocation then this
+must be the case.
+
+Finally, the flag byte (Lrelflag) must not be in UDATA, since that has
+probably not been zeroed out at the time it gets used! Programs using
+this type of code to give pure-ish results will probably not use UDATA
+anyway, except for storing the relocation table.
+
+------------------------------------------------------------------------
+
+See readme_txt for copyright details.
+
+------------------------------------------------------------------------
+
+13/7/1993 RJK

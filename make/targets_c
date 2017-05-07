@@ -1,0 +1,224 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* targets */
+/*#define DEBUG*/
+#include "make.h"
+#include <stdio.h>
+
+void free(void *);
+
+static void dump_target(struct target *);
+static struct target *fd_target(char *, int);
+static int dump_secondaries(struct target *, struct target *, int);
+
+/*
+ * Find a target given its name
+ */
+struct target *find_target(char *name)
+{
+	return fd_target(name, 0);
+}
+
+/*
+ * Define a target
+ * It's up to the calling code to add the dependency list and
+ * command sequence
+ */
+struct target *define_target(char *name)
+{
+	return fd_target(name, 1);
+}
+
+/*
+ * Find/define a target
+ */
+static struct target *fd_target(char *name, int create)
+{
+	struct target *t,**tt;
+	int i;
+
+	for(tt = &targets;
+		(t = *tt) && (i = FNCMP(name,t->name));
+		tt = (i < 0 ? &t->left : &t->right)
+		) ;
+	if(!t && create) {
+		*tt = NEW(t);
+		t->left = t->right = NULL;
+		t->name = safe_strdup(name);
+		t->primary = NULL;
+		t->depend = NULL;
+		t->current = NULL;
+		t->command = NULL;
+		t->remake = 0;
+		t->visiting = 0;
+		getdate(t);
+	}
+	return t;
+}
+
+/*
+ * Create a new dependent list for a target
+ */
+void newdepend(struct target *t)
+{
+	struct dset *dp, **dpp;
+
+	debug(printf("DEBUG: new dependent list for %s\n", t->name););
+	/* Stick new list on the END of current list of lists */
+	for(dpp = &t->depend; dp = *dpp; dpp = &dp->next)
+		;
+	*dpp = NEW(dp);
+	dp->next = NULL;
+	dp->depend = NULL;
+	dp->command = NULL;
+	dp->changed = 0;
+	t->current = dp;
+}
+
+/*
+ * Define tchild to be a dependent file of tparent
+ * Avoids duplication, sticks new dependents on the end of the list
+ */
+void makedepend(struct target *tparent, struct target *tchild)
+{
+	struct depend *d,**dd;
+
+	assert(tparent->current);
+	if(tchild->primary)
+		tchild = tchild->primary;
+
+	for(dd = &tparent->current->depend; d = *dd; dd = &d->next) {
+		if(d->target == tchild)
+			return;
+	}
+	debug(printf("DEBUG: %s depends on %s\n", tparent->name, tchild->name););
+	*dd = NEW(d);
+	d->next = NULL;
+	d->target = tchild;
+	d->changed = 0;
+}
+
+/*
+ * List all targets
+ */
+void dump_targets(void)
+{
+	puts(messages[MSG_TARGETSTITLE]);
+	dump_target(targets);
+}
+
+/*
+ * Subroutine for listing targets
+ */
+static void dump_target(struct target *t)
+{
+	if(t) {
+		dump_target(t->left);
+		if(!t->primary) {
+			struct dset *ds;
+
+			if(dump_secondaries(targets, t, 0))
+				fputs("\n\n", stdout);
+			for(ds = t->depend; ds; ds = ds->next) {
+				struct depend *d;
+
+			 	printf("%s: ",t->name);
+				for(d = ds->depend; d; d = d->next)
+					printf("%s ",d->target->name);
+				fputc('\n',stdout);
+				dump_command(ds->command);
+				fputc('\n',stdout);
+			}
+			if(t->command) {
+				printf("%s:\n", t->name);
+				dump_command(t->command);
+				fputc('\n', stdout);
+			} else if(!t->depend) {
+				printf("%s:\n\n", t->name);
+			}
+		}
+		dump_target(t->right);
+	}
+}
+
+/*
+ * Subroutine to list any secondaries that a target may have
+ */
+static int dump_secondaries(struct target *t, struct target *primary, int flag)
+{
+	if(t) {
+		flag = dump_secondaries(t->left, primary, flag);
+		if(t->primary == primary) {
+			if(!flag) {
+				printf("%s -", primary->name);
+				flag = 1;
+			}
+			printf(" %s", t->name);
+		}
+		flag = dump_secondaries(t->right, primary, flag);
+	}
+	return flag;
+}
+
+/*
+ * Delete a target [6/4/1993]
+ * Assumption: nothing depends on this target!
+ * Assumption: this target has no dependencies, no commands &c
+ * This is a very dangerous function! It is only used once, from within
+ * templates_c.
+ */
+void delete_target(struct target *t)
+{
+	struct target **tpp, *tp;
+
+	assert(!t->primary);
+	assert(!t->depend);
+	assert(!t->command);
+	assert(!t->remake);
+	assert(!t->visiting);
+
+	debug(printf("DEBUG: delete target '%s'\n", t->name););
+	tpp = &targets;
+	while(tp = *tpp) {
+		int i;
+
+		if(tp == t)
+			break;
+		debug(printf("DEBUG: '%s'\n", tp->name););
+		i = FNCMP(t->name, tp->name);
+		assert(i != 0);
+		tpp = i < 0 ? &tp->left : &tp->right;
+	}
+	assert(tp);
+	debug(puts("DEBUG: found target to delete"););
+	/*
+	 * Do a non-lazy deletion, even though a fairly lazy one should always
+	 * suffice. (Lazy deletion is something different.)
+	 */
+	if(tp->right) {
+		struct target **tpr, *tr;
+
+		tpr = &tp->right->left;
+		while(tr = *tpr)
+			tpr = &tr->left;
+		*tpr = tp->left;
+		*tpp = tp->right;
+	} else
+		*tpp = tp->left;
+	debug(puts("DEBUG: set links"););
+	free(t);
+}

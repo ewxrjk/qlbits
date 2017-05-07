@@ -1,0 +1,250 @@
+/*
+ * Library sort program
+ *
+ * (c) 1993 Richard Kettlewell
+ *
+ * For details of how to do topological sorting as in this program, see
+ * Knuth 'The Art of Computer Programming vol 1: Fundamental Algorithms'
+ * (pub Addison-Wesley) section 2.2.3.
+ * The algorithm presented there isn't quite suitable since each
+ * relationship in the input comes in two bits.
+ */
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "lib.h"
+#include "opts.h"
+
+char _prog_name[] = "LSORT";
+char _version[] = "1.0";
+char _copyright[] = "(c) 1993 RJK";
+int _stack = 16000;
+void consetup_title();
+void (*_consetup)() = consetup_title;
+
+char cflag, eflag, hflag, iflag = 1, vflag;
+
+Option opt_tab[] = {
+	{ 'c',			"case",			&cflag,		NULL },
+	{ 'e',			"error",		&eflag,		NULL },
+	{ 'h',			"help",			&hflag,		NULL },
+	{ 'i',			"nocase",		&iflag,		NULL },
+	{ 'v',			"verbose",		&vflag,		NULL },
+	{ OPT_O_POS,	NULL,			NULL,		NULL },
+	{ OPT_O_END,	NULL,			NULL,		NULL }
+};
+
+#define LIBNAME		5
+
+void usage(void);
+void sort_lib(char *);
+void list_undefined(Symbol *);
+
+int main(int argc, char **argv)
+{
+	if((argc = opt_collect(opt_tab, argc, argv)) < 0 || hflag || (cflag && iflag)) {
+		usage();
+		return hflag ? 0 : 1;
+	}
+	if(cflag)
+		comparator = strcmp;
+	if(iflag)
+		comparator = stricmp;
+	sort_lib(opt_tab[LIBNAME].text);
+	return 0;
+}
+
+void usage(void)
+{
+	fprintf(stderr, "%s %s\n(c) 1993 Richard Kettlewell\n", _prog_name, _version);
+	fputs("---sort an SROFF library\n\n", stderr);
+	fputs("    LSORT [-cehiv] filename\n\n", stderr);
+	fputs("    -c    --case     Case dependent symbol name comparison\n", stderr);
+	fputs("    -e    --error    Circular symbol list to stdout\n", stderr);
+	fputs("    -h    --help     This help\n", stderr);
+	fputs("    -i    --nocase   Case independent symbol name comparison [default]\n", stderr);
+	fputs("    -v    --verbose  Verbose mode\n", stderr);
+}
+
+/*
+ * Sort a single named library
+ */
+void sort_lib(char *filename)
+{
+	Module *curmod;
+	Module **mpp;
+	int was_sorted;
+	FILE *fp;
+
+	/*
+	 * Load the library
+	 */
+	if(loadlib(filename, 1))
+		return;
+	if(vflag)
+		list_undefined(symbols);
+	/*
+	 * Now rewrite the known relationships 'backwards'
+	 */
+	for(curmod = modules; curmod; curmod = curmod->next) {
+		Symlist *syml, *syml1;
+
+		/*
+		 * For each and every symbol _required_ by module curmod...
+		 */
+		syml = curmod->requires;
+		while(syml1 = syml) {
+			Module *mp;
+
+			mp = syml->symbol->definition;
+			if(mp) {
+				Modlist *ml, **mll;
+				
+				/*
+				 * If curmod requires a symbol defined in mp
+				 * then mp must follow curmod
+				 * i.e., mp is required by curmod
+				 * This fact is added to the list
+				 * It may be that the relationship is already on the
+				 * list in which case it would be a bad idea to add it
+				 * again.
+				 */
+				mll = &mp->requiredby;
+				while(ml = *mll) {
+					if(ml->module == curmod)
+						break;
+					mll = &ml->next;
+				}
+				if(!ml) {
+					ml = malloc(sizeof(Modlist));
+					if(!ml) {
+						fputs("Insufficient memory\n", stderr);
+						return;
+					}
+					*mll = ml;
+					ml->next = NULL;
+					ml->module = curmod;
+				}
+			}
+			syml = syml->next;
+			/* no point hanging on to symbols required list */
+			free(syml1);
+		}
+		curmod->requires = NULL;
+	}
+	/*
+	 * Now overwrite the output.
+	 * There is a small danger of trashing the library but we aren't
+	 * going to get drive full, since we're writing the same number
+	 * of bytes, and the library read ok.
+	 */
+	if(!(fp = fopen(filename, "wb"))) {
+		fprintf(stderr, "Can't open %s\n", filename);
+		return;
+	}
+	/*
+	 * Look for a module which is required by no other modules
+	 * i.e., one which can come before all other modules. Output
+	 * that module and remember that we've done it.
+	 *
+	 * fixme: Use variable was_sorted to avoid writing out a library
+	 * to no purpose. (hack this into lload_c will work.)
+	 */
+	was_sorted = 1;
+	while(modulecount > 0) {
+		int chg = 0;
+
+		/*
+		 * Check all modules which haven't been output yet, and output
+		 * them if possible.
+		 */
+		mpp = &modules;
+		while(curmod = *mpp) {
+			Modlist *ml;
+
+			/*
+			 * See curmod is still required to follow
+			 * any modules which haven't been written yet
+			 */
+			for(ml = curmod->requiredby; ml; ml = ml->next)
+				if(ml->module->text) {
+					/*
+					 * Some module requires curmod.
+					 * Therefore, curmod can't be output just yet.
+					 */
+					mpp = &curmod->next;
+					goto not_yet;
+				}
+			/* Write image */
+			fwrite(curmod->text, (size_t)1, (size_t)curmod->length, fp);
+
+			/* This module now requires nothing */
+			curmod->text = NULL;
+
+			/* Count down modules remaining */
+			modulecount--;
+
+			/* Notice that we've done something */
+			chg = -1;
+
+			/* Unlink module */
+			*mpp = curmod->next;
+not_yet:	;
+		}
+		if(chg) {
+			if(!modulecount && was_sorted) {
+				if(vflag)
+					fputs("Library was already sorted\n", stderr);
+			} else
+				was_sorted = 0;
+		} else {
+			/*
+			 * Problem. The remaining modules are all required to follow
+			 * at least one module which has not been output yet; so
+			 * there is no solution. The dependencies are, if -e was
+			 * specified, listed to the standard output using the
+			 * notation
+			 *		module1 < module2
+			 * meaning that for some reason we want to put module1
+			 * before module2.
+			 */
+			fputs("Circular dependencies --- can't sort\n", stderr);
+			if(eflag)
+				printf("%s :\n", filename);
+			for(curmod = modules; curmod; curmod = curmod->next) {
+				if(curmod->text) {
+					Modlist *ml;
+					
+					if(eflag) {
+						for(ml = curmod->requiredby; ml; ml = ml->next)
+							if(ml->module->text)
+								printf("%s < %s\n", ml->module->name, curmod->name);
+					}
+					fwrite(curmod->text, (size_t)1, (size_t)curmod->length, fp);
+					modulecount--;
+				}
+			}
+			if(eflag)
+				putchar('\n');
+			was_sorted = 0;
+		}
+	}
+	/*
+	 * Tidy up
+	 */
+	if(ferror(fp))
+		fputs("Error writing library\n", stderr);
+	if(fclose(fp))
+		fputs("Error closing library\n", stderr);
+	fp = NULL;
+}
+
+void list_undefined(Symbol *sp)
+{
+	if(sp) {
+		list_undefined(sp->links[0]);
+		if(!sp->definition)
+			fprintf(stderr, "---'%s' undefined\n", sp->name);
+		list_undefined(sp->links[1]);
+	}
+}

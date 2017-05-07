@@ -1,0 +1,37 @@
+/*
+ * Linker --- global variables
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#include "lnk.h"
+
+FILE *msfile;
+Module *modules;
+Relsym *xrelsyms;
+Section *sections;
+Symbol *symbols[HASHES];
+char Yflag;
+char Zflag;
+char alwaysrel = 0x40;
+char caseind = 1;
+char dottrans;
+char falsecommon;
+char map;
+char reltab = 1;
+char sym;
+char verbose;
+char xflag;
+char yflag;
+char zflag;
+int maxsecnamelen = 8;
+int maxsymnamelen = 8;
+int relocations;
+int rounding = 2;
+long common_start;
+long commonsize;
+long externals;
+long programsize;
+long relsize;
+long stacksize;
+long symcount;
+long undefined;

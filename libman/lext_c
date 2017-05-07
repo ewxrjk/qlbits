@@ -1,0 +1,187 @@
+/*
+ * Library table generator
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#include <string.h>
+#include <stdio.h>
+#include <qdos.h>
+#include <time.h>
+#include "lib.h"
+#include "opts.h"
+
+char _prog_name[] = "LEXT";
+char _version[] = "1.0";
+char _copyright[] = "(c) 1993 RJK";
+int _stack = 16000;
+void consetup_title();
+void (*_consetup)() = consetup_title;
+
+char cflag, dflag, eflag, fflag, iflag, hflag, mflag, oflag, uflag, vflag;
+
+Option opt_tab[] = {
+	{ 'c',				"stdout",		&cflag,		NULL },
+	{ 'd',				"delete",		&dflag,		NULL },
+	{ 'e',				"extract",		&eflag,		NULL },
+	{ 'f',				"freshen",		&fflag,		NULL },
+	{ 'i',				"impose",		&iflag,		NULL },
+	{ 'h',				"help",			&hflag,		NULL },
+	{ 'm',				"move",			&mflag,		NULL },
+	{ 'o',				"original",		&oflag,		NULL },
+	{ 'u',				"update",		&uflag,		NULL },
+	{ 'v',				"verbose",		&vflag,		NULL },
+	{ 'x'|OPT_O_STR,	"extend",       "_o",		NULL },
+	{ OPT_O_POS,		NULL,			NULL,		NULL },
+	{ OPT_O_LIST,		NULL,			NULL,		NULL }
+};
+
+#define EXTEND		10
+#define LIBNAME		11
+
+void usage(void);
+
+int main(int argc, char **argv)
+{
+	int i;
+	int changed = 0;
+	int rval = 0;
+
+	if((argc = opt_collect(opt_tab, argc, argv)) < 2 || hflag) {
+		usage();
+		return hflag ? 0 : 1;
+	}
+	if(!(dflag || eflag))
+		eflag = 1;
+	if((cflag && (uflag || fflag || dflag)) || (dflag && (uflag || fflag || eflag)) || (uflag && fflag)) {
+		usage();
+		return 1;
+	}
+	if(loadlib(opt_tab[LIBNAME].text, 0))
+		return -7;
+	for(i = 1; i < argc; i++) {
+		Module **mpp, *mp;
+
+		mpp = &modules;
+		while(mp = *mpp) {
+			if(fnmatch(mp->name, argv[i])) {
+				if(dflag) {
+					if(vflag)
+						fprintf(stderr, "Deleting '%s'\n", mp->name);
+					*mpp = mp->next;
+					changed = 1;
+				} else {
+					char filename[64];
+					FILE *fp;
+					char *msg;
+
+					if(cflag)
+						fp = stdout;
+					else {
+						strcpy(filename, mp->name);
+						if(!oflag) {
+							char *p = filename;
+							while(*p == '_')
+								p++;
+							if(!strchr(p, '_'))
+								strcat(filename, opt_tab[EXTEND].text);
+						}
+						if(uflag || fflag) {
+							struct qdirect qd;
+
+							fp = fopen(filename, "rb");
+							if(fp) {
+								/* file exists --- only output if library is more recent */
+								fs_headr(fgetchid(fp), -1, (char *)&qd, (long)sizeof qd);
+								fclose(fp);
+								if(qd.d_update < mp->date) {
+									msg = "Updating";
+									fp = fopen(filename, "wb");
+									if(fp == NULL) {
+										rval = 2;
+										fprintf(stderr, "Can't create '%s'\n", filename);
+									}
+								} else
+									fp = NULL;
+							} else {
+								/* file does not exist --- output unless just doing --freshen */
+								if(!fflag) {
+									msg = "Creating";
+									fp = fopen(filename, "wb");
+									if(fp == NULL) {
+										rval = 2;
+										fprintf(stderr, "Can't create '%s'\n", filename);
+									}
+								} else
+									fp = NULL;
+							}
+						} else {
+							/* output regardless */
+							msg = "Writing";
+							fp = fopen(filename, "wb");
+							if(fp == NULL) {
+								rval = 2;
+								fprintf(stderr, "Can't create '%s'\n", filename);
+							}
+						}
+					}
+					if(fp) {
+						if(vflag)
+							if(cflag)
+								fprintf(stderr, "Writing from '%s'\n", mp->name);
+							else
+								fprintf(stderr, "%s '%s' from '%s'\n", msg, filename, mp->name);
+						fwrite(mp->text, (size_t)1, (size_t)mp->length, fp);
+						if(ferror(fp)) {
+							if(fp == stdout)
+								fputs("Error writing stdout\n", stderr);
+							else
+								fprintf(stderr, "Error writing '%s'\n", filename);
+							rval = 2;
+						}
+						if(fp != stdout)
+							fclose(fp);
+					}
+					if(mflag) {
+						*mpp = mp->next;
+						changed = 1;
+					} else
+						mpp = &mp->next;
+				}
+			} else
+				mpp = &mp->next;
+		}
+	}
+	if(changed && !rval) {
+		Module *mp;
+		FILE *fp;
+
+		if(!(fp = fopen(opt_tab[LIBNAME].text, "wb"))) {
+			fprintf(stderr, "Can't re-write '%s'\n", opt_tab[LIBNAME].text);
+			return 2;
+		}
+		for(mp = modules; mp; mp = mp->next)
+			fwrite(mp->text, (size_t)1, (size_t)mp->length, fp);
+		if(ferror(fp))
+			fprintf(stderr, "Error writing '%s' --- library broken\n", opt_tab[LIBNAME].text);
+		fclose(fp);
+	}
+	return rval;
+}
+
+void usage(void)
+{
+	fprintf(stderr, "%s %s\n(c) 1993 Richard Kettlewell\n", _prog_name, _version);
+	fputs("---extract/delete from SROFF library\n\n", stderr);
+	fputs("    LEXT [-cdefihmouv] [-x extension] libraryfile [module ...]\n\n", stderr);
+	fputs("    -c    --stdout    Send all extracted modules to stdout\n", stderr);
+	fputs("    -d    --delete    Delete\n", stderr);
+	fputs("    -e    --extract   Extract [default]\n", stderr);
+	fputs("    -f    --freshen   Freshen\n", stderr);
+	fputs("    -h    --help      This help\n", stderr);
+	fputs("    -m    --move      Move files\n", stderr);
+	fputs("    -o    --original  Don't modify name\n", stderr);
+	fputs("    -u    --update    Update\n", stderr);
+	fputs("    -v    --verbose   Verbose\n", stderr);
+	fputs("    -x    --extend    Set extension [_o]\n", stderr);
+}
+

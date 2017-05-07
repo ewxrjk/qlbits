@@ -1,0 +1,54 @@
+/*
+ * Library management stuff
+ */
+#if (C68 || __C68__) && !defined(text)
+#define text _text_
+#endif
+
+typedef unsigned char Byte;
+typedef long Date;
+typedef struct Symbol Symbol;
+typedef struct Module Module;
+typedef struct Symlist Symlist;
+typedef struct Modlist Modlist;
+
+struct Symbol {
+	Symbol *links[2];
+	Module *definition;					/* Module in which symbol is defined */
+	char name[33];
+};
+
+struct Module {
+	Module *next;						/* Next module */
+	char name[33];						/* Module name */
+	char banner[128];					/* Module banner */
+	char *filename;						/* Filename to replace module from */
+	Date date;							/* Update date of module */
+	long offset;						/* Offset into file */
+	Byte *text;							/* Start address of module image */
+	long length;						/* Length of module image */
+	Symlist *requires;					/* Symbols required */
+	Modlist *requiredby;				/* Modules that this module must follow */
+										/* =modules that this module is required by */
+};
+
+struct Symlist {
+	Symlist *next;
+	Symbol *symbol;
+};
+
+struct Modlist {
+	Modlist *next;
+	Module *module;
+};
+
+extern int (*comparator)(const char *, const char *);
+extern char vflag;
+extern char eflag;
+extern Byte *text;
+extern Module *modules;
+extern Symbol *symbols;
+extern int modulecount;
+extern long length;
+
+int loadlib(char *, int);

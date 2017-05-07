@@ -1,0 +1,178 @@
+/*
+ * Linker --- listing output
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#include	"lnk.h"
+#include	<stdio.h>
+#include	<string.h>
+#include	<stdlib.h>
+
+static void sort(Symbol **, int, int);
+
+int big_map(FILE *fp)
+{
+	Module *mp;
+	Subsection *sbp;
+	Section *sp;
+
+	for(sp = sections; sp; sp = sp->next)
+		fprintf(fp, "%*s ", sp->colwidth, sp->name);
+	fputs("Module\n\n", fp);
+	for(mp = modules; mp; mp = mp->next) {
+		for(sp = sections; sp; sp = sp->next) {
+			for(sbp = mp->contents; sbp && sbp->section != sp; sbp = sbp->nextm)
+				;
+			if(sbp && sbp->length)
+				fprintf(fp, "%*s%08lX ", sp->colwidth - 8, "", sbp->length);
+			else
+				fprintf(fp, "%*s ", sp->colwidth, "");
+		}
+		fprintf(fp, "%s\n", mp->name);
+	}
+	fputc('\n', fp);
+	return ferror(fp);
+}
+
+int little_map(FILE *fp)
+{
+	Section *sp;
+	int com = 0;
+
+	fprintf(fp, "%-*s    Start   Length\n\n", maxsecnamelen, "Section");
+	for(sp = sections; sp; sp = sp->next)
+		if(sp->common == 2)
+			com = 1;
+		else
+			fprintf(fp, "%-*s %8lX %8lX\n", maxsecnamelen, sp->name, sp->offset, sp->length);
+	if(com) {
+		fprintf(fp, "\n%-*s   Offset   Length\n\n", maxsecnamelen, "Section");
+		for(sp = sections; sp; sp = sp->next)
+			if(sp->common == 2)
+				fprintf(fp, "%-*s %8lX %8lX\n", maxsecnamelen, sp->name, sp->offset, sp->length);
+	}
+	fprintf(fp, "\n%-*s %8lX\n%-*s %8lX\n%-*s %8lX\n%-*s %8lX\n\n",
+		maxsecnamelen+9, "Program", programsize,
+		maxsecnamelen+9, "Relocation", relsize,
+		maxsecnamelen+9, "Common", commonsize,
+		maxsecnamelen+9, "Dataspace", stacksize);
+	return ferror(fp);
+}
+
+int symbol_table(FILE *fp)
+{
+	Symbol *sp, **syms, **symp;
+	int i;
+
+	if(!symcount)
+		return 0;
+	if(!(symp = syms = malloc(sizeof(Symbol *) * symcount))) {
+		fputs("Insufficient memory to generate symbol table\n", stderr);
+		return -1;
+	}
+	for(i = 0; i < HASHES; i++)
+		for(sp = symbols[i]; sp; sp = sp->next)
+			*symp++ = sp;
+	fprintf(fp, "%-*s   Offset %*s Module\n\n", maxsymnamelen, "Symbol",
+	        maxsecnamelen, "Section");
+	sort(syms, 0, symcount-1);
+	symp = syms;
+	for(i = 0; i < symcount; i++) {
+		sp = *symp++;
+		fprintf(fp, "%-*s ", maxsymnamelen, sp->name);
+		if(sp->undefined)
+			fputs("Undefined\n", fp);
+		else if(sp->external)
+			fputs("External\n", fp);
+		else
+			fprintf(fp, "%08lX %*s %s%s\n",
+					sp->base ? sp->base->offset + sp->offset : sp->offset,
+					maxsecnamelen, sp->base ? sp->base->section->name : "",
+					sp->module ? sp->module->name : "",
+					sp->used ? "" : " [unused]");
+	}
+	free(syms);
+	fputc('\n', fp);
+	return ferror(fp);
+}
+
+/*
+ * Quicksort
+ * The basic code here is taken from "C: The Complete Reference" by
+ * Herbert Schildt, but I added the optimisations relating to very
+ * small sort intervals and to the recursion.
+ * Schildt's book is one of the few competent books on C written by
+ * someone who wasn't involved in Unix in the 70's or on the ANSI/ISO
+ * committees :-)
+ */
+static void sort(Symbol **table, int l, int r)
+{
+	int i, j;
+	char *pivot;
+
+repeat:
+
+	/*
+	 * Don't mess around for small sorts
+	 * NB, r != l except for empty symbol table
+	 */
+	if(r - l == 1) {
+		if(strcmp(table[l]->name, table[r]->name) > 0) {
+			Symbol *sp, **spl, **spr;
+			sp = *(spl = &table[l]);
+			*spl = *(spr = &table[r]);
+			*spr = sp;
+		}
+		return;
+	}
+
+	i = l;
+	j = r;
+	pivot = table[(l+r)>>1]->name;
+
+	do {
+		while(strcmp(table[i]->name, pivot) < 0 && i < r)
+			i++;
+		while(strcmp(table[j]->name, pivot) > 0 && j > l)
+			j--;
+		if(i <= j) {
+			Symbol *sp, **spi, **spj;
+			
+			sp = *(spi = &table[i]);
+			*spi = *(spj = &table[j]);
+			*spj = sp;
+			i++;
+			j--;
+		}
+	} while(i <= j);
+	/*
+	 * Recursive step. We only ever recurse if we really have to
+	 * ---we prefer to loop. When we have to recurse, we do so
+	 * only for the smaller partition, so that the number
+	 * of recursions is minimised.
+	 * (Recursion is much slower than looping.)
+	 * A compsci will tell you that you should use recursion anyway
+	 * and let the compiler optimiser turn the tail recursion into
+	 * loops, but what do they know?
+	 */
+	if(l < j) {
+		if(i < r) {
+			if(j - l < r - i) {
+				sort(table, l, j);
+				l = i;
+				goto repeat;
+			} else {
+				sort(table, i, r);
+				r = j;
+				goto repeat;
+			}
+		} else {
+			r = j;
+			goto repeat;
+		}
+	}
+	if(i < r) {
+		l = i;
+		goto repeat;
+	}
+}

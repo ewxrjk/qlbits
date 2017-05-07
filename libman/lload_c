@@ -1,0 +1,323 @@
+/*
+ * Load a library
+ */
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "lib.h"
+
+int (*comparator)(const char *, const char *) = stricmp;
+Byte *text;
+Module *modules;
+Symbol *symbols;
+int modulecount;
+long length;
+
+static Symbol *find_symbol(char *);
+
+/*
+ * Load a library
+ */
+int loadlib(char *filename, int mksyms)
+{
+	register Byte *p;
+	Byte *end;							/* End of library */
+	Module *curmod;
+	Module **mpp;
+	FILE *fp;
+
+	/*
+	 * Load the library
+	 */
+	fp = fopen(filename, "rb");
+	if(!fp) {
+		fprintf(stderr, "Library '%s' does not exist\n", filename);
+		return 1;
+	}
+	fseek(fp, 0L, SEEK_END);
+	length = ftell(fp);
+	rewind(fp);
+	text = malloc((size_t)length);
+	if(!text) {
+		fputs("---insufficient memory\n", stderr);
+		return -1;
+	}
+	if(1 != fread(text, (size_t)length, (size_t)1, fp)) {
+		fputs("---can't read\n", stderr);
+		return -1;
+	}
+	fclose(fp);
+	fp = NULL;
+	/*
+	 * Analyse library
+	 * Each module is given a list of symbols which it requires.
+	 * The module will have to appear before all the modules
+	 * which define such symbols.
+	 * We have to record such relationships as lists of symbols and
+	 * not modules since the list entry must be constructed at a time
+	 * when the defining module may not be known.
+	 */
+	p = text;
+	end = text + length;
+	curmod = NULL;
+	mpp = &modules;
+	modulecount = 0;
+	while(p < end) if(*p++ == 0xFB) switch(*p++) {
+		case 0x01:
+			if(curmod) {
+				fputs("Unexpected SOURCE directive\n", stderr);
+				return -1;
+			} else {
+				char name[256];
+				char *banner;
+
+				strncpy(name, (char *)(p+1), (size_t)*p);
+				name[*p] = 0;
+				banner = strchr(name, ' ');
+				if(banner) {
+					*banner++ = 0;
+					while(*banner == ' ')
+						banner++;
+				}
+				if(strlen(name) > 32) {
+					fprintf(stderr, "Module name too long '%s'\n", name);
+					return -1;
+				}
+				/*
+				 * New module
+				 */
+				*mpp = curmod = malloc(sizeof(Module));
+				if(!curmod) {
+					fputs("Insufficient memory\n", stderr);
+					return -1;
+				}
+				curmod->next = NULL;
+				curmod->requires = NULL;
+				curmod->requiredby = NULL;
+				curmod->text = p - 2;
+				curmod->filename = NULL;
+				strcpy(curmod->name, name);
+				if(banner) {
+					char *q;
+					q = strrchr(banner, '|');
+					if(q) {
+						if(1 != sscanf(q+1, "%lx", &curmod->date))
+							curmod->date = 0L;
+						else
+							*q = 0;
+					} else
+						curmod->date = 0L;
+					strcpy(curmod->banner, banner);
+				} else
+					curmod->banner[0] = 0;
+				mpp = &curmod->next;
+				p = p + *p + 1;
+				modulecount++;
+			}
+			break;
+		case 0x02:
+			p = p + *p + 1;
+			if(!curmod && vflag)
+				fputs("---COMMENT outside module\n", stderr);
+			break;
+		case 0x03:
+			p += 4;
+			if(!curmod && vflag)
+				fputs("---ORG outside module\n", stderr);
+			break;
+		case 0x04:
+			p += 2;
+			if(!curmod && vflag)
+				fputs("---SECTION outside module\n", stderr);
+			break;
+		case 0x05:
+			p += 4;
+			if(!curmod && vflag)
+				fputs("---OFFSET outside module\n", stderr);
+			break;
+		case 0x06: {
+				Symbol *sym;
+				char name[256];
+
+				if(!curmod) {
+					fputs("XDEF outside module\n", stderr);
+					return -1;
+				}
+				/*
+				 * Definition of a symbol
+				 */
+				if(mksyms) {
+					strncpy(name, (char *)(p+1), (size_t)*p);
+					name[*p] = 0;
+					if(*p > 32) {
+						fprintf(stderr, "Symbol name too long '%s'\n", name);
+						return -1;
+					}
+					sym = find_symbol(name);
+					if(!sym)
+						return -1;
+					if(sym->definition) {
+						/*
+						 * Is it worthwhile allowing multiple definitions?
+						 * The first instance will always be chosen, so no.
+						 */
+						fprintf(stderr, "Symbol %s multiply defined\n", name);
+						return -1;
+					}
+					sym->definition = curmod;
+				}
+				p = p + *p + 7;
+			}
+			break;
+		case 0x07:
+			p += 5;
+			if(!curmod && vflag)
+				fputs("---XREF outside module\n", stderr);
+			while(*p != 0xFB) {
+				if(*p != '+' && *p != '-' && vflag)
+					fputs("---unknown XREF operator\n", stderr);
+				p += 3;
+			}
+			p++;
+			break;
+		case 0x10:
+			if(!curmod) {
+				fputs("DEFINE outside module\n", stderr);
+				return -1;
+			}
+			if(*p & 128)
+				p = p + p[2] + 3;
+			else {
+				Symlist *syml;
+				Symbol *sym;
+				char name[256];
+
+				/*
+				 * Symbol reference
+				 */
+				p += 2;
+				if(mksyms) {
+					strncpy(name, (char *)(p+1), (size_t)*p);
+					name[*p] = 0;
+					if(*p > 32) {
+						fprintf(stderr, "Symbol name too long '%s'\n", name);
+						return -1;
+					}
+					sym = find_symbol(name);
+					if(!sym)
+						return -1;
+					syml = malloc(sizeof(Symlist));
+					if(!syml) {
+						fputs("Insufficient memory\n", stderr);
+						return -1;
+					}
+					syml->next = curmod->requires;
+					syml->symbol = sym;
+					curmod->requires = syml;
+				}
+				p = p + *p + 1;
+			}
+			break;
+		case 0x12:
+			p += 2;
+			if(!curmod && vflag)
+				fputs("---COMMON outside module\n", stderr);
+			break;
+		case 0x13:
+			if(!curmod && vflag)
+				fputs("---END outside module\n", stderr);
+			else {
+				/*
+				 * End of a module
+				 */
+				curmod->length = p - curmod->text;
+				curmod = NULL;
+			}
+		case 0xFB:
+			break;
+		default:
+			fprintf(stderr, "Unknown directive %02X\n", p[-1]);
+			return -1;
+	}
+	/*
+	 * Must have a properly terminated module at the end
+	 * (otherwise length field is unset)
+	 */
+	if(curmod != NULL) {
+		fputs("END expected\n", stderr);
+		return -1;
+	}
+	return 0;
+}
+
+static Symbol *find_symbol(char *name)
+{
+	Symbol **spp, *sp;
+
+	spp = &symbols;
+	while(sp = *spp) {
+		int i;
+
+		if(!(i = (*comparator)(name, sp->name)))
+			return sp;
+		spp = &sp->links[i > 0];
+	}
+	sp = malloc(sizeof(Symbol));
+	if(!sp) {
+		fputs("Insufficient memory\n", stderr);
+		return NULL;
+	}
+	*spp = sp;
+	sp->links[0] = 0;
+	sp->links[1] = 0;
+	sp->definition = 0;
+	strcpy(sp->name, name);
+	return sp;
+}
+
+#if 0
+/*
+ * If we only operate on one library per program call,
+ * no need to bother deleting any structures
+ */
+void delete_modules(Module *mp)
+{
+	Module *mp1;
+
+	while(mp1 = mp) {
+		delete_symlist(mp->requires);
+		delete_modlist(mp->requiredby);
+		mp = mp->next;
+		free(mp1);
+	}
+}
+
+void delete_symbols(Symbol *sp)
+{
+	if(sp) {
+		delete_symbols(sp->links[0]);
+		delete_symbols(sp->links[1]);
+		free(sp);
+	}
+}
+
+void delete_symlist(Symlist *sp)
+{
+	Symlist *sp1;
+	
+	while(sp1 = sp) {
+		sp = sp->next;
+		free(sp1);
+	}
+}
+
+void delete_modlist(Modlist *mp)
+{
+	Modlist *mp1;
+
+	while(mp1 = mp) {
+		mp = mp->next;
+		free(mp1);
+	}
+}
+#endif

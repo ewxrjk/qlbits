@@ -1,0 +1,47 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+#include	<stdio.h>
+#include	"make.h"
+
+int execflag = 1;
+int verbose = 1;
+int dumpflag = 0;
+int ignoreflag = 0;
+int envflag;
+struct template *templates;				/* List of templates */
+struct target *targets;					/* Tree of targets */
+FILE *input;
+Line rawinput;
+Line expanded;
+
+#if QDOS || __QDOS__
+#include	<qdos.h>
+char _prog_name[] = PROGNAME;
+char _version[] = VERSION;
+char _copyright[] = "(c) 1993 RJK";
+long _stack = 10000L;
+
+/* Have a titled window */
+void consetup_title();
+void (*_consetup)(chanid_t) = consetup_title;
+
+struct WINDOWDEF _condetails = {
+	2, 1, 0, 7,
+	484, 242, 14, 4
+};
+#endif
+

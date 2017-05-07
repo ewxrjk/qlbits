@@ -1,0 +1,33 @@
+*
+* CONFIG stuff for CC
+*
+* (c) 1993 Richard Kettlewell
+*
+         xdef     cclinker
+*
+         section  DATA
+*
+         dc.b     '<<QCFX>>01'
+         dc.w     2,'cc'
+         dc.w     3,'1.1'
+*
+         dc.b     0,'L'
+         dc.w     i.linker-*
+         dc.w     0
+         dc.w     0
+         dc.w     d.linker-*
+         dc.w     a.linker-*
+*
+         dc.w     -1
+*
+i.linker dc.w     64
+         dc.w     3
+cclinker dc.b     'LNK'
+         ds.b     61
+*
+d.linker dc.w     6
+         dc.b     'Linker'
+*
+a.linker dc.w     0
+*
+         end

@@ -1,0 +1,10 @@
+/*#define DEBUG*/
+/*#define NDEBUG*/
+#include <assert.h>
+
+#ifdef DEBUG
+#define	debug(X)	do{printf("%s:%d: ",__FILE__,__LINE__);X;}while(0)
+#else
+#define	debug(X)
+#endif
+

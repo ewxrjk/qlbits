@@ -1,0 +1,120 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* templates */
+#include	<string.h>
+#include	<stdlib.h>
+#include	"make.h"
+
+/*
+ * Create new template
+ * It's up to the calling code to add the command list
+ */
+struct template *define_template(char *from, char *to)
+{
+	struct template *t;
+
+	NEW(t);								/* Create new template */
+	t->next = templates;				/* Link at start of list */
+	templates = t;						/* ...i.e. overwrite old templates */
+	strcpy(t->from, from);				/* Set extensions */
+	strcpy(t->to, to);
+	t->command = NULL;					/* No command yet */
+	return t;							/* Indicate command */
+}
+
+/*
+ * Apply templates
+ */
+int apply_templates(struct target *t, int instance)
+{
+	char *p,*q;
+	struct template *r;
+	struct dset *ds;
+	struct target *new_target;
+	char buffer[256];
+	int done = 0;
+
+	if(!t)
+		return 0;
+
+	if(t->command)
+		goto escape;
+	for(ds = t->depend; ds; ds = ds->next)
+		if(ds->command)
+			goto escape;
+	if(!(q = strrchr(t->name, EXTCHAR)))/* Will any template match? */
+		goto escape;
+	if(strlen(t->name) >= 256) {
+		printf(messages[MSG_LONGNAME], t->name);
+		exit(EXIT_FAILURE);
+	}
+
+	strcpy(buffer,t->name);				/* Duplicate name */
+	q++;								/* Start of extension */
+	p = (q - t->name) + buffer;			/* Find _ in copy */
+	for(r = templates; r; r = r->next) {/* For all templates */
+		if(!FNCMP(q, r->to)) {			/* Does template match target? */
+			strcpy(p, r->from);			/* Create dependent name */
+			if(!instance) {
+				/* looking among existing targets */
+				if(new_target = find_target(buffer)) {
+					if(new_target->primary)
+						new_target = new_target->primary;
+					newdepend(t);
+					makedepend(t, new_target);
+					t->current->command = r->command;
+					break;
+				}
+			} else {
+				FILE *fp;
+
+				/* looking for existing file --- no existing target */
+				if(fp = fopen(buffer, "r")) {
+					fclose(fp);
+					new_target = define_target(buffer);
+											/* Define new target */
+					newdepend(t);
+					makedepend(t, new_target);
+					assert(t->current);
+					t->current->command = r->command;
+					break;
+				}
+			}
+		}
+	} /* end for r */
+escape:
+	if(instance)
+		return done || apply_templates(t->left, 1) || apply_templates(t->right, 1);
+	else
+		return done | apply_templates(t->left, 0) | apply_templates(t->right, 0);
+}
+
+void dump_templates(void)
+{
+	struct template *t;
+
+	puts(messages[MSG_TEMPLATESTITLE]);
+	for(t = templates; t; t = t->next) {
+#if __QDOS__ || QDOS
+		printf("_%s_%s:\n", t->from, t->to);
+#else
+		printf(".%s.%s:\n", t->from, t->to);
+#endif
+		dump_command(t->command);
+		fputc('\n',stdout);
+	}
+}

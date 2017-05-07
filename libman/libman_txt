@@ -1,0 +1,366 @@
+Library Management Programs
+======= ========== ========
+
+1 Introduction
+
+Traditional methods of managing SROFF libraries involve using a program
+like slb from the c68 distribution, combined with the tsort program for
+establishing library orderings.
+
+slb by itself is a moderately efficient program. However, the
+combination with tsort is rather clumsy. I here present an alternative
+set of utilities.
+
+1.1 The Author
+
+I am...
+
+	Richard Kettlewell
+	rjk@greenend.org.uk
+
+1.2 Copyright
+
+These programs are copyright (c) 1993 Richard Kettlewell. You may
+(re-)distribute the entire package, comprising source code, executable
+programs and documentation, in machine readable form provided the
+original author is acknowledged and all alterations are clearly marked
+as such. No other (re-)distribution is permitted.
+
+
+2 lsort
+
+The program that most people will find useful from this package is
+lsort, since it simplifies a function of slb rather than merely
+duplicating it.
+
+The purpose of lsort is to sort a library into a 'correct' order in a
+single operation, without recourse to temporary files, lists of modules
+or the tsort program (the functionality of which is essentially built
+into lsort.)
+
+A library is in the correct order if every module M appears before the
+modules M1, M2, ... in which the symbols referred to in M are defined.
+For example, supposing the module strtol_o has references to the symbols
+isalnum, toupper and errno which are, respectively, defined in modules
+isalnum_o, toupper_o and errno_o, then strtol_o should appear at some
+point in the library before these three other modules.
+
+When a library is correctly ordered, the linker may scan it in a single
+pass and include all the modules required for its output. Since Ql
+linkers only perform a single scan pass, regardless of library order,
+incorrectly ordered libraries tend to produce link errors.
+
+Notice that there is not necessarily a unique correct order: there may
+be many different orders which are all correct.
+
+lsort is called as follows:
+
+	lsort [-cehiv] filename
+
+	-c	Case dependent symbol name comparison
+	-e	Circular symbol list to stdout
+	-h	Help
+	-i	Case independent symbol name comparison [default]
+	-v	Verbose mode
+
+The filename parameter is simply the name of the library. For normal
+use, you need no further parameters; you simply run it and when it has
+finished, the library is in some correct order.
+
+The -c and -i options are unlikely to be useful; anything which relies
+on symbols being compared in either fashion to work is likely to fail to
+link either now or in the future. lsort can cope with libraries written
+to either standard.
+
+The -v option generates a list of symbols not defined in the library,
+and also prints a message if the library was already in a correct order.
+
+The -e option comes in useful when you manage to create a library for
+which no correct order exists; it writes a list of ordering
+relationships to the standard output stream which describe the ordering
+requirements of modules that cannot be ordered due to the presence of
+circular dependencies: for example, a_o must precede b_o which must
+precede c_o which must precede a_o, which clearly is impossible.
+
+The format of the list is
+
+	module1 < module2
+
+meaning 'module1 must precede module2'. There is also some junk at the
+top of the file; this is not a problem since the output really needs
+human intervention as opposed to mechanical processing.
+
+
+3 lrep
+
+The lrep program replaces the update functions of slb. It can replace
+modules, add them to either end of the library and do replacment
+conditionally on update dates.
+
+	lrep [-aefhmnuv] libraryfile objectfile ...
+
+	-a	Append added modules (default=preprend)
+	-e	Retain extension
+	-f	Freshen
+	-h	Help
+	-m	Move
+	-n	Use inherent module name
+	-u	Update
+	-v	Verbose
+
+The name of a module added to the library is normally derived from the
+filename, by chopping of the extension (so file strtol_o produces module
+strtol.) The extension may be retained with the -e option.
+
+Each module also has a name given to it by the assembler or compiler
+that produced it; this is normally discarded but the -n option prevents
+this and instead discards the filename. The -e option is meaningless in
+conjunction with -n.
+
+If -m is specified, all files specified except the library itself are
+deleted after a succesful operation. If there is any problem then no
+files are deleted, however.
+
+If -u is specified, then modules are only updated if the file version is
+more recent than the library copy, or there was no library copy. The -f
+option is similar, except that no new modules are added --- only
+existing ones are updated.
+
+Usually, if a new module is added then it is stuck on the beginning of
+the library, which gives it the greatest chance of being in the right
+place in the ordering. However, if you specify -a then all new modules
+are placed at the end of the library. With -f, of course, this becomes
+irrelevant.
+
+Specifying -v causes messages of the form 'adding ...' and 'replacing
+...' to be written as lrep carries out its work.
+
+Note that lrep requires that each file must contain exactly one object
+module. It does not support what would essentially be library merging.
+
+The SROFF format does not contain any standard way of recording a
+module's update date once it is inside a library. The way I do it is to
+add an extra bit to the information field of a 'SOURCE' directive ---
+consisting of the string '|date' where date is the hexadecimal form of
+the update date.
+
+For some unknown reason, slb ignores information fields and regards them
+as part of the module name. The same applies to ld. This annoying bug
+can lead to rather strange looking module tables from both these
+programs.
+
+
+4 ltab
+
+The ltab program is used to generate tables of library contents.
+
+	ltab [-hlv] library [module ...]
+
+	-h	Help
+	-l	Long format
+	-v	Verbose
+
+If you don't specify -l, then all that is produced is a list of names
+(with banners stripped.) With -l, you get length, position in library,
+update date, name and banner. The extra date information that lrep
+appends to the banner is not printed as part of the banner.
+
+If you specify a list of module names on the command line then only
+those modules are listed. The wildcard and joker characters --- '*' and
+'?' --- may be used to specify a set of names. Make sure that you
+include or leave out any extension which may have been retained in
+module names.
+
+The -v option doesn't do anything just now.
+
+
+5 lext
+
+	lext [-cdefihmouv] [-x extension] libraryfile [module ...]
+
+	-c	Send all extracted modules to stdout
+	-d	Delete
+	-e	Extract [default]
+	-f	Freshen
+	-h	Help
+	-m	Move
+	-o	Don't modify name
+	-u	Update
+	-v	Verbose
+	-x	Set extension [_o]
+
+The lext program is used for the extraction and deletion of modules from
+a library. The two basic options are -d, which specifies that the named
+modules are to be removed from the libray, and -e, which specifies that
+the named modules are to be written to some output.
+
+The -e option may usually be ommitted; it is assumed that this is what
+you want to do.
+
+The -c option causes all library modules specified to be written to a
+single file, the standard output stream. This may be used to create
+subset libraries; the output of -c will not necessarily be correctly
+ordered, though in later versions of lext it probably will be.
+
+If -c is not used then the name to output each module to is generated
+from the module name. If there is an extension already in it (e.g. '_o'
+or '_obj') then that is used; otherwise the extension specified by -x is
+appended. If -o is specified, however, then the filename is exactly the
+module name.
+
+The -u and -f options operate much as before: -u only writes a module if
+the corresponding file does not exist, or if the library module is more
+recent, and -f only writes a module if the corresponding file exists and
+is less recent.
+
+If -m is specified then modules are deleted from the library after being
+written, or after -u, -f have forced them not be written when they
+otherwise would have been. If any errors occur then no such deletion
+takes place.
+
+
+Appendix A SROFF Format
+
+Each module is a sequence of data bytes and directives, starting with a
+SOURCE directive and terminated by an END directive. Traditionally files
+containing such modules are of type 2.
+
+A data byte is any byte apart from FB; a directive starts with the byte
+FB. The special directive FB FB is equivalent to a data byte of code FB.
+Within the module, there are no alignment requirements.
+
+Within a directive, a string is a byte giving the length of the string,
+followed by up to 255 bytes giving the text of the string. A symbol is a
+string of no more than 32 characters starting with a letter or '.' and
+containing only letters, digits, '$', '_' or '.'. In practice, the only
+restrictions you need to follow are to keep lengths no greater than 32
+and probably to avoid null characters.
+
+A section is a block of code generated by the linker. Each module makes
+a contribution to 1 or more sections; such a contribution is called a
+subsection. Within a module, each subsection may be broken into several
+parts.
+
+In the output file, each subsection will be word aligned, but each part
+of a subsection will not. I would suggest that forward looking authors
+would make their linkers align subsections on longword boundaries.
+
+Section names, module names and symbol names occupy disjoint name
+spaces; there is no possibility of confusing the linker, though
+confusing humans is certainly possible.
+
+The directives are as follows:
+
+SOURCE		FB 01 string
+
+	Marks the start of a module. The string should contain a module
+name, which is essentially a symbol, possibly followed by an information
+field or banner; if there is a banner then it is separated from the name
+by a space, and is no longer than 80 characters in length.
+
+	The lrep program assumes that if there is a '|' character in the
+banner then it is followed by the hexadecimal update date of the module.
+
+	The slb and ld programs have bugs in that they don't seem to
+believe anyone will ever include a banner in a module, a remarkably
+short-sighted attitude.
+
+COMMENT		FB 02 string
+
+	Defines a comment, which is no longer than 80 characters, which
+should be printed by the linker if the module is included.
+
+ORG		FB 03 longword
+
+	Marks the start of an absolute section. I don't think anyone has
+ever come up with a sensible use for this; on the GST linker it needs to
+be combined with the OFFSET command in the linker control file to get
+meaningful results.
+
+SECTION		FB 04 word
+
+	Marks the start of a subsection, or goes back a subsection which
+had been left earlier. The word is as defined by the DEFINE directive,
+see below.
+
+OFFSET		FB 05 longword
+
+	Resets the output address to some positive offset from the start
+of the current subsection or absolute section. So FB 05 00 00 00 00 will
+go back and start the module over; however, the previously generated
+code is not deleted unless you specify something to replace it with,
+when it is overwritten.
+
+XDEF		FB 06 symbol longword word
+
+	Defines a symbol as having the value given by the longword plus
+the start of the subsection defined by the word id (see DEFINE below.)
+If the id is 0 then the symbol simply has the value of the longword.
+
+XREF		FB 07 longword byte [ operator word ... ] FB
+
+	Generates code for an external reference. The value to be output
+is built up from the longword with the values of symbols and addresses
+of subsections added to it.
+
+The byte is formatted as follows:
+
+	bits 0-2	Size to output (1, 2 or 4)
+	bit 3		Signed output (affects range checking)
+	bit 4		Unsigned output (affects range checking)
+	bit 5		PC relative (i.e. subtract current address)
+	bit 6		Relocate longword (put address into relocation
+			table.)
+	bit 7		Should be 0
+
+If bit 6 is set for a longword then it will have the base of the program
+added to it at runtime, assuming the correct relocation code is included
+in the program. The precise format use depends on the linker; the GST
+linker produces a rather bloated table, ld is better but could be
+improved upon.
+
+Each operator is a '+' or '-' denoting addition or subtraction of the
+following word id. If the id refers to a symbol, its value is added or
+subtracted; if it refers to a subsection then the start of that
+subsection is added or substracted.
+
+If the id is 0 then the current address is added or subtracted. The list
+of operations is terminated by an FB.
+
+DEFINE		FB 10 word symbol
+
+	Defines an id word. If the word has a positive value, the symbol
+is taken to be an external symbol; if it is negative then it refers to a
+subsection which is, of course, local.
+
+Do not use one id to refer to two symbols/sections or two ids to refer
+to a single symbol/section.
+
+COMMON		FB 12 word
+
+	This is identical to the SECTION directive except that the
+section is a common section. Within one module, there is no difference,
+but all subsections of a common section start at the same address. There
+is presumably a good reason for this.
+
+END		FB 13
+
+	Marks the end of a module.
+
+FB		FB FB
+
+	Equivalent to the data byte FB, which you can't have because it
+is used to introduce a directive.
+
+There are a number of restrictions on the order in which directives may
+appear; basically, you must follow the principle of 'declare before use'
+--- a DEFINE directive for a given id must precede its first use in an
+XDEF, XREF, SECTION or COMMON directive.
+
+Also, no data bytes or OFFSET or XREF directives may appear before the
+first ORG, SECTION or COMMON directive.
+
+A library consists of a sequence of modules appended end-to-end in a
+file. Since Ql linkers only make a single pass of libraries, the
+ordering of modules within libraries is rather important.
+

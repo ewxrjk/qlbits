@@ -1,0 +1,124 @@
+/*
+ *              _ c m d p a r a m s
+ *
+ *  This routine is used to parse the command 
+ *  the users program.
+ *
+ *  By the time this routine is reached, the following 
+ *  assumptions can be made:
+ *
+ *  a)  All arguments identified by the special characters
+ *      '=', '%', '<' and '>' have been processed and
+ *      replaced by spaces.
+ *
+ *  b)  The _argc and _argv global variables are initialised
+ *      with the program name details
+ *
+ * 28/7/1993 Expand escapes in quoted strings
+ *           You need a version of crt_o which is aware of this!
+ */
+#include <qdos.h>
+#include <ctype.h>
+#include <string.h>
+#include <stdlib.h>
+
+extern char **_argv;
+extern int _argc;
+extern void (*_cmdwildcard)(char *, int);
+
+static
+void parse_params ( cl )
+char *cl;   /* Command line */
+{
+    for ( ; ; ) {
+        char sc;
+        char *param;
+
+        while( *cl && *cl == ' ' )
+            cl++; /* Get past any white space */
+        if( *cl == '\'' ||  *cl =='"')
+            sc = *cl++;        /* Next argument is string - store terminator */
+        else {
+            if (*cl == '\\')
+                cl++;
+            sc = ' ';
+        }
+        if( ! *(param=cl))
+            break; /* End of line reached */
+        /*
+         * Parse until terminating character reached
+         * The terminating charaacter is changed to a NULL byte.
+		 *
+		 * 28/7/1993 RJK For quoted arguments, escapes are
+		 * expanded according to ANSI C conventions.
+		 * The difference between octal and hex escapes *is*
+		 * correct --- X3J11 felt this bizarre inconsistency
+		 * a good idea?
+		 * Don't put "\0" as an argument, it's silly.
+         */
+		if(sc != ' ') {
+			int c;
+			char *ptr = param;
+
+			while((c = *cl++) != sc) {
+				if(c == '\\' && *cl) switch(c = *cl++) {
+					case 'a': c = '\a'; break;
+					case 'b': c = '\b'; break;
+					case 't': c = '\t'; break;
+					case 'n': c = '\n'; break;
+					case 'v': c = '\v'; break;
+					case 'f': c = '\f'; break;
+					case 'r': c = '\r'; break;
+					case '0': case '1': case '2': case '3':
+					case '4': case '5': case '6': case '7':
+						c -= '0';
+						if(*cl >= '0' && *cl <= '7') {
+							c = (c << 3) + *cl++ - '0';
+							if(*cl >= '0' && *cl <= '7')
+								c = (c << 3) + *cl++ - '0';
+						}
+						break;
+					case 'x':
+						c = strtol(cl, &cl, 16);
+						break;
+					case '"':
+					case '\'':
+					case '?':
+					case '\\':
+						break;
+					default:
+						cl--;
+						c = '\\';
+						break;
+				}
+				*ptr++ = c;
+			}
+			*ptr = 0;
+		} else
+	        for ( ; *cl ; cl++ ) {
+	            if (*cl == sc) {
+	                *cl++ = '\0'; /* Put correct terminator on word */
+	                break;
+	            }
+	        }
+        /*
+         *  Call routine to store handle this argument
+         */
+        (*_cmdwildcard)(param, sc);
+    }
+    /*
+     * Set the last argument as NULL
+     */
+    _argv[_argc] = NULL;
+}
+
+/*================================================================*/
+
+/*
+ *  Set default value for vector to point to this
+ *  routine so that it gets included unless the
+ *  user has specifically excluded it.
+ */
+
+void (*_cmdparams)() = parse_params;
+

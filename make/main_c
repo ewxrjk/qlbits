@@ -1,0 +1,529 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* executive */
+#if __QDOS__
+#include	<qdos.h>
+#endif
+#include	<stdlib.h>
+#include	<string.h>
+#include	<ctype.h>
+#include	"make.h"
+
+#define V_MAKEFLAGS 0
+
+static int def_templates = 1;
+static char *mfname = MAKEFILE;
+static struct depend *rmlist /*= NULL*/;
+static char good_cc;
+
+static void defaults(int);
+static void usage(int);
+static void license(void);
+static void commands(int, char **);
+#if V_MAKEFLAGS
+static int breakdown(int *, char ***, char *);
+static int conv_char(char **);
+#endif
+static char **do_template(char **);
+
+/*
+ * List of default macros in form "name","definition"
+ * with NULL terminating the list
+ * The current ordering has logic behind it! Don't change it without
+ * good reason!
+ */
+static char *dmacs[] = {
+	"LDLIB",	"",
+	"CPP",      "cpp",
+	"RFLAGS",   "-r",
+	"AS",       "as68",
+	"CPPFLAGS",	"-D__C68__ -D__QDOS__ -D__MC68000__",
+	"MAC",      "mac",
+	"TMP",      "tmp_",
+	"AFLAGS",   "",
+	"ALIST",    "",
+	"CC",       "cc",
+	"CFLAGS",   "-warn=5",
+	"CPPADEFS",	"-D__MC68000__ -D__ASM__ -D__QDOS__",
+	"CPPASM",   "-P",
+	"LD",       "cc",
+	"LDFLAGS",  "",
+	"LEX",      "flex",
+	"LFLAGS",   "-8",
+	"MACFLAGS", "-errors",
+	"MACLIST",  "con_",
+	"RM",       "del",
+	"YACC",     "bison",
+	"YFLAGS",   "",
+
+	NULL
+};
+
+/*
+ * Default templates in form "from","to"{,"command"},NULL
+ * with NULL terminating list
+ */
+static char *dtemplates[] = {
+	"l",   "c",   "$(LEX) -t $(LFLAGS) $< >$@",
+	              NULL,
+
+	"y",   "c",   "$(YACC) -o$@ -d $(YFLAGS) $<",
+	              NULL,
+
+	"c",   "o",   "$(CC) -c $(CFLAGS) $(CPPFLAGS) $<",
+	              NULL,
+
+	"s",   "o",   "$(AS) $(AFLAGS) $< $@",
+	              NULL,
+
+	"asm", "rel", "$(MAC) $< $(MACLIST) $@ $(MACFLAGS)",
+	              NULL,
+	NULL
+};
+
+static char *direct_x_o[] = {
+	"x",   "o",   "$(CPP) $(CPPASM) $(CPPADEFS) $< $(TMP)$*_s",
+	              "$(AS) $(AFLAGS) $(TMP)$*_s $@",
+	              "@$(RM) $(RFLAGS) $(TMP)$*_s",
+	              NULL,
+};
+
+static char *cc_x_o[] = {
+	"x",   "o",   "$(CC) -c $(CFLAGS) $(CPPADEFS) $<",
+	              NULL,
+};
+
+/*
+ * Main program
+ */
+int main(int argc,char **argv)
+{
+#if V_MAKEFLAGS
+	char *p;
+
+	if(p = getenv("MAKEFLAGS")) {
+		/*
+		 * Undocumented and unsupported feature
+		 */
+		int mfargc;
+		char **mfargv;
+		
+		if(breakdown(&mfargc, &mfargv, p))
+			return EXIT_FAILURE;
+		commands(mfargc, mfargv);
+	}
+#endif
+	commands(argc, argv);
+	/* fixme: set MAKEFLAGS to hold current options */
+	defaults(def_templates);
+	debug(puts("DEBUG: set defaults"));
+	/*
+	 * Now set command line macros, which override defaults
+	 * Arrangement of code allows for other parts of command line
+	 * to be postponed beyond definition of defaults as well
+	 */
+	debug(printf("DEBUG: makefile is %s\n", mfname ? mfname : "[stdin]"));
+	/*
+	 * Open and analyse makefile
+	 * fixme: arrange for cpp to get a look at Makefile maybe?
+	 */
+	if(mfname) {
+		if(!(input = fopen(mfname, "r"))) {
+			printf(messages[MSG_CANTOPEN], mfname);
+			return EXIT_FAILURE;
+		}
+	} else
+		input = stdin;
+	if(analyse()) {
+		puts(messages[MSG_ANALYSIS]);
+		return EXIT_FAILURE;
+	}
+	if(ferror(input)) {
+		printf(messages[MSG_CANTREAD], mfname);
+		return EXIT_FAILURE;
+	}
+	if(mfname)
+		if(fclose(input))
+			printf(messages[MSG_CANTCLOSE], mfname);
+	do {
+		while(apply_templates(targets, 0))
+			;
+	} while(apply_templates(targets, 1));
+	if(rmlist) {
+		int changed;
+		struct depend *d;
+
+		do {
+			changed = 0;
+			for(d = rmlist; d; d = d->next)
+				changed |= decide(d->target);
+		} while(changed);
+		for(d = rmlist; d; d = d->next)
+			if(!d->target->remake)
+				printf(messages[MSG_UPTODATE], d->target->name);
+		for(d = rmlist; d; d = d->next)
+			remake(d->target);
+	} else if(targets) {
+		decide(targets);
+		if(!targets->remake)
+			printf(messages[MSG_UPTODATE], targets->name);
+		else
+			remake(targets);
+	} else
+		printf(messages[MSG_0TARGETS]);
+	if(dumpflag) {
+		fputc('\n', stdout);
+		dump_macros();
+		dump_targets();
+		dump_templates();
+	}
+	return 0;
+}
+
+static void usage(int r)
+{
+	int i;
+
+	puts(PROGNAME " " VERSION);
+	puts("(c) 1993 Richard Kettlewell\n");
+	puts(messages[MSG_USAGE]);
+	puts("  MAKE [-einpsrxhXL] [-f<name>] [<name>=<text> ...] [<target>...]\n");
+	for(i = MSG_OPTe; i <= MSG_OPTTARGET; i++)
+		puts(messages[i]);
+	fputc('\n', stdout);
+	exit(r);
+}
+
+static void defaults(int dtemps)
+{
+	char **p;
+
+	for(p = dmacs; *p != NULL; p += 2)
+		if(!mdefined(*p))
+			define_macro(p[0], p[1], -1);
+
+	if(dtemps) {
+		p = dtemplates;
+		while(*p != NULL)
+			p = do_template(p);
+		if(good_cc)
+			do_template(cc_x_o);
+		else
+			do_template(direct_x_o);	
+	}
+}
+
+static char **do_template(char **p)
+{
+	struct template *t;
+	struct command **cpp, *cp;
+	char *q;
+			
+	t = define_template(p[0], p[1]);
+	p += 2;
+	cpp = &t->command;
+	while((q = *p++) != NULL) {
+		*cpp = NEW(cp);
+		cp->next = NULL;
+		cpp = &cp->next;
+		cp->quiet = cp->ignore = 0;
+		while(*q == '@' || *q == '-') {
+			if(*q++ == '@')
+				cp->quiet = -1;
+			else
+				cp->ignore = -1;
+		}
+		cp->command = q;
+	}
+	return p;
+}
+
+/*
+ * Set a target's date and return it
+ * OS-dependent
+ */
+long getdate(struct target *t)
+{
+	FILE *fp;
+
+	if(fp = fopen(t->name, "r")) {
+#if __QDOS__
+		struct qdirect qd;
+
+		if(fs_headr(fgetchid(fp), -1, (char *)&qd, (long)sizeof qd) > 0) {
+			if(!(t->date = qd.d_update))
+				printf(messages[MSG_NODATE], t->name);
+		} else {
+			printf(messages[MSG_NOREADDATE], t->name);
+			exit(EXIT_FAILURE);
+		}
+#endif
+		fclose(fp);
+	} else
+		t->date = 0;
+	debug(printf("DEBUG: date of '%s' is %lx\n", t->name, t->date););
+	return t->date;
+}
+
+static void commands(int argc, char **argv)
+{
+	char *p;
+	struct depend *d, **dd;
+
+	argc--;
+	argv++;
+	while(argc-- > 0) {
+		if((*argv)[0] == '-') {
+			p = 1 + *argv;
+			while(*p) switch(*p++) {
+				case 'f':
+					if(*p)
+						mfname = strcmp(p, "-") ? p : NULL;
+					else
+						if(argc-- > 0)
+							usage(BAD_PARAMETER);
+						else
+							mfname = strcmp(p = *argv, "-") ? p : NULL;
+					p = "";
+					break;
+
+				case 'n':
+					execflag = 0;
+					break;
+
+				case 'q':				/* deprecated */
+					fputs("Replace -q with -s\n", stderr);
+				case 's':
+					verbose = 0;
+					break;
+
+				case 'p':
+					dumpflag = 1;
+					break;
+
+				case 'i':
+					ignoreflag = 1;
+					break;
+
+				case 'e':
+					envflag = 1;
+					break;
+
+				case 'r':
+					def_templates = 0;
+					break;
+
+				case 'h':
+				case '?':
+					usage(0);
+
+				case 'L':
+					license();
+					exit(0);
+
+				case 'x': {
+					char buffer[FILENAME_MAX];
+					struct command *com;
+
+					if(!*p)
+						if(argc-- > 0)
+							usage(BAD_PARAMETER);
+						else
+							p = *argv;
+					for(dd = &rmlist; d = *dd; dd = &d->next)
+						;
+					*dd = NEW(d);
+					d->next = NULL;
+					newdepend(d->target = define_target(p));
+					strcpy(buffer, p);
+					p = strrchr(buffer, EXTCHAR);
+					if(p)
+						if(!FNCMP(p+1, "bin")
+						   || !FNCMP(p+1, "exe")
+						   || !FNCMP(p+1, "out")
+						)
+							*p = 0;
+#if EXTCHAR == '_'
+					strcat(buffer, "_o");
+#elif EXTCHAR == '.'
+					strcat(buffer, ".o");
+#else
+					{
+						static char oext[] = {EXTCHAR, 'o', 0};
+
+						strcat(buffer, oext);
+					}
+#endif
+					makedepend(d->target, define_target(buffer));
+					com = NEW(d->target->current->command);
+					com->next = NULL;
+					com->command = "$(LD) $(LFLAGS) -o$@ $> $(LDLIB)";
+					com->ignore = 0;
+					com->quiet = 0;
+					p = "";
+					break;
+				}
+
+				case 'X':
+					good_cc = 1;
+					break;
+
+				default:
+					usage(BAD_PARAMETER);
+			}
+		} else if(p = strchr(*argv, '=')) {
+			*p++ = 0;
+			define_macro(*argv, p, 1);
+		} else {
+			for(dd = &rmlist; d = *dd; dd = &d->next)
+				;
+			*dd = NEW(d);
+			d->next = NULL;
+			d->target = define_target(*argv);
+		}
+		argv++;
+	}
+}
+
+#if V_MAKEFLAGS
+/*
+ * Break a string down as an argument string
+ * Doesn't know about IO redirection --- no need
+ * Returns non-zero on failure.
+ *
+ * If you add IO redirection, then you've got most of what you need
+ * here for a decent command line handler. Things like stack and
+ * memory size don't really belong on the command line, so forget
+ * about those.
+ *
+ * NB, not tested and use not encouraged.
+ */
+static int breakdown(int *p_argc, char ***p_argv, char *text)
+{
+	int argc;
+	char **argv;
+	char *tp;
+
+	argc = 1;
+	if(!(argv = malloc(sizeof(char *))))
+		return -1;
+	tp = text;
+	while(isspace((unsigned char)*tp))
+		tp++;
+	while(*tp) {
+		int q;
+		char *sp;
+		char *ap;
+
+		argc++;
+		if(!(argv = realloc(argv, argc * sizeof(char *))))
+			return -1;
+		sp = tp;
+		switch(q = *tp++) {
+			case '\'':
+			case '"':
+				while(*tp && *tp != q) {
+					if(*tp == '\\' && tp[1] != 0)
+						tp++;
+					tp++;
+				}
+				if(!(ap = argv[argc-1] = malloc((size_t)(tp - sp))))
+					return -1;
+				sp++;
+				while(*sp && *sp != q)
+					*ap++ = conv_char(&sp);
+				*ap = 0;
+				tp++;
+				break;
+			default:
+				while(*tp && !isspace((unsigned char)*tp)) {
+					if(*tp == '\\' && tp[1] != 0)
+						tp++;
+					tp++;
+				}
+				if(!(ap = argv[argc-1] = malloc((size_t)(tp - sp))))
+					return -1;
+				while(*sp && !isspace((unsigned char)*sp))
+					*ap++ = conv_char(&sp);
+				break;
+		}
+		while(isspace((unsigned char)*tp))
+			tp++;
+	}
+	if(!(argv = realloc(argv, (1+argc) * sizeof(char *))))
+		return -1;
+	argv[argc] = NULL;
+	*p_argc = argc;
+	*p_argv = argv;
+	return NULL;
+}
+
+/*
+ * Consume one character
+ *
+ * NB, not tested
+ */
+static int conv_char(char **spp)
+{
+	char *sp = *spp;
+	int c;
+
+	if((c = *sp++) == '\\') switch(c = *sp++) {
+		case 0:
+			c = '\\';
+			sp--;
+			break;
+		case 'a': c = '\a'; break;
+		case 'b': c = '\b'; break;
+		case 't': c = '\t'; break;
+		case 'n': c = '\n'; break;
+		case 'v': c = '\v'; break;
+		case 'f': c = '\f'; break;
+		case 'r': c = '\r'; break;
+		case '0': case '1': case '2': case '3':
+		case '4': case '5': case '6': case '7':
+			c -= '0';
+			if(isdigit((unsigned char)*sp) && *sp != '8' && *sp != '9')
+				c = (c << 3) + *sp++ - '0';
+			if(isdigit((unsigned char)*sp) && *sp != '8' && *sp != '9')
+				c = (c << 3) + *sp++ - '0';
+			break;
+		case 'x':
+			c = strtol(sp, &sp, 16);
+			break;
+		default:
+			break;
+	}
+	*spp = sp;
+	return c;
+}
+#endif
+
+static void license(void)
+{
+	puts("Copyright (C) 1993 Richard Kettlewell");
+	puts("  This program is free software; you can redistribute it and/or modify it under");
+	puts("the terms of the GNU General Public License as published by the Free Software");
+	puts("Foundation; either version 2 of the License, or (at your option) any later");
+	puts("version.");
+	puts("  This program is distributed in the hope that it will be useful, but WITHOUT");
+	puts("ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS");
+	puts("FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.");
+	puts("  You should have received a copy of the GNU General Public License along with");
+	puts("this program; if not, write to the Free Software Foundation, Inc., 675 Mass Ave,");
+	puts("Cambridge, MA 02139, USA.");
+}

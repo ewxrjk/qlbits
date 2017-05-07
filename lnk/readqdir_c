@@ -1,0 +1,122 @@
+/*
+ *			r e a d q d i r _ c
+ *
+ *	Read a QDOS directory entry, only returning entries
+ *	that match required name and attributes.
+ *
+ * 22/7/1993 RJK one bug fix; plus, ret_dir or ret_name may be NULL
+ *               (both may be null but that would be silly!)
+ *
+ */
+
+#include <qdos.h>
+#include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+
+/*
+ * Routine to pass N instances of a character.
+ */
+static void pass_n( txt, tpr, chr, num)
+char *txt, **tpr, chr;
+int num;
+{
+	for( *tpr =txt; num; (*tpr)++, num--)
+		for(; **tpr != chr; (*tpr)++);
+}
+
+int read_qdir( chid, devwc, ret_name, ret_dir, attr)
+chanid_t chid;		/* QDOS channel id for directory */
+char *devwc;		/* device and wildcard (same as used for open directory) */
+char *ret_name; 	/* Name to return */
+struct qdirect *ret_dir; /* Directory structure to read into */
+int attr;			/* Types to read 0 = all, 1 = data, 2 = prog, 4 = directory */
+{
+	extern int _qlmknam();
+	extern int fnmatch();
+	short int isdev, i, num_up;
+	int devtype;
+	int rd;
+	char device[12];
+	char wc[MAXNAMELEN+1];
+	char fname[MAXNAMELEN+1];
+	char ndevwc[MAXNAMELEN+1];
+	char cwd[MAXNAMELEN+1];
+	char *gtp;
+	struct qdirect my_dir[1];
+
+	if(!ret_dir)
+		ret_dir = my_dir;
+
+	/* bug was here */
+	if( strlen(devwc) > MAXNAMELEN) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if( !(isdev = isdevice( devwc, &devtype ))) {
+		/* No device passed - put the default device in front */
+		getcwd(cwd,MAXNAMELEN);
+		if((num_up = _qlmknam( ndevwc, cwd, devwc, MAXNAMELEN))==-1)
+			return -1;
+	} else
+		strcpy( ndevwc, devwc);
+
+	/* First split device and wildcard name */
+	/* Go past either one or 2 '_'s */
+	pass_n( ndevwc, &gtp, '_', devtype & NETDEV ? 2 : 1);
+	i = gtp - ndevwc;
+	strncpy( device, ndevwc, (size_t)i);
+	device[i] = '\0'; /* Terminate the string correctly */
+	strcpy( wc, &ndevwc[i]);
+
+	/* Now read a directory entry */
+	for(;;) {
+		if((rd =io_fstrg(chid,(timeout_t)-1,(char *)ret_dir,(short)DREADSIZE))!=DREADSIZE) {
+			/* Didn't read an entry */
+			if(!rd)
+				return 0; /* Zero on EOF */
+			else
+				return -1; /* Error */
+		}
+
+		if( !ret_dir->d_szname ||
+				!fnmatch( qlstr_to_c(fname, (struct QLSTR *)&ret_dir->d_szname), wc))
+			continue; /* If no file or doesn't match wild name, get next */
+
+		/* Ensure the file type wanted matches */
+		if( attr != QDR_ALL) {
+			/* A sub-range of file types is wanted */
+			switch (ret_dir->d_type) {
+				case QF_DIR_TYPE:
+				case THOR_DIR_TYPE:
+						if (!(attr & QDR_DIR))
+							continue; /* No directories wanted */
+						break;
+				case QF_PROG_TYPE:
+						if (!(attr & QDR_PROG))
+							continue; /* No progs wanted */
+						break;
+				case QF_DATA_TYPE:
+						if (!(attr & QDR_DATA))
+							continue; /* No data files wanted */
+						break;
+			}
+		}
+		/* Now create the 'C' name */
+		if(ret_name)
+			if( isdev ) {
+				strcpy( ret_name, device);
+				strcat( ret_name, fname);
+			} else {
+				*ret_name = 0;
+				for( i = 0; i < num_up; i++ )
+					strcat( ret_name, ".._");
+				/* Name in directory entry is already in fname */
+				strcat( ret_name, &fname[ strlen(gtp) - strlen(devwc) + (num_up*3)]);
+			}
+		break;
+	}
+	return 1; /* A name was read */
+}
+

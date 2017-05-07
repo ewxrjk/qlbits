@@ -1,0 +1,242 @@
+/*
+ * Linker --- symbol table management
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+#include	"lnk.h"
+#include	<string.h>
+#include	<ctype.h>
+#include	<math.h>
+
+/* configuration for this module */
+#define COMPILER_STRCMP		0			/* Compiler optimisation? [sym.c] */
+
+static Section udata = {
+	NULL,
+	"UDATA",
+	NULL,
+	0L,
+	0L,
+	8,
+	0
+};
+
+static Symbol *sym_buffer;
+int sym_remain;
+
+/*
+ * All symbol access keyed on name is done through this function.
+ * A symbol may be in three states; defined, undefined or unseen.
+ * An undefined symbol is one that has been seen and must become
+ * defined for the link to succeed; an unseen one is one that
+ * has not appeared in any context which can cause it to
+ * become undefined or defined, e.g. library scans.
+ *
+ * Module names and section names do not live in this name space.
+ *
+ * By using a large hash table, we speed up symbol searches
+ * rather a lot --- divide by HASHES (typically 128 or 32) before
+ * we start! Further, each hash chain (set of symbols sharing a
+ * hash code) is sorted, thus on average halving search time.
+ * The sort is sucht that alphabetically sorted definitions
+ * gain most --- there's no other sensible alternative.
+ *
+ * Binary trees aren't a very good idea here, they only do 'log'
+ * to the number of comparisons and for most programs, the current
+ * algorithm beats this (e.g. 1024 symbols: hash = 4 compares,
+ * binary tree = 10 compares.) The compares towards the end of a
+ * search in a binary tree will be longer too, since the names
+ * are similar. Also, binary trees tend to get unbalanced which
+ * can seriously degrade performance.
+ *
+ * To unbalance this kind of hash table, you have to choose your
+ * symbol names very carefully indeed!
+ *
+ * The initial scan overhead of to find the hash code is small
+ * --- about the same as 1 compare --- and is negligible if you're
+ * converting to a single letter case at the same time.
+ *
+ * sym_buffer is used to save memory --- only 1/128 as many heap
+ * headers --- and save time --- only 1/128 as many calls to
+ * malloc(), which is typically not fast.
+ */
+Symbol *symbol(char *name, int create)
+{
+	register int c;
+	int h = 0;
+	register unsigned char *p = (unsigned char *)name, *q;
+	Symbol *sp, **spp;
+
+#ifdef DEBUG
+	fprintf(stderr, "symbol(\"%s\");\n", name);
+#endif
+
+	if(*name == '.' && dottrans)
+		*name = '_';
+
+	if(caseind) {
+		/*
+		 * Calculate the hash code and convert to upper case simultaneously
+		 */
+		while(c = *p)
+			h ^= *p++ = toupper(c);
+	} else {
+		/*
+		 * Just calculate hash code
+		 */
+		while(c = *p++)
+			h ^= c;
+	}
+	spp = &symbols[h & (HASHES-1)];
+	while(sp = *spp) {
+#if COMPILER_STRCMP
+		if(!(c = strcmp(name, sp->name)))
+			return sp;
+#else
+		/*
+		 * This is only faster if:
+		 *    (a) there is no automatic expansion of strcmp(), and
+		 *    (b) all names differ fairly early on
+		 * We check (a) with a conditional; (b) is quite likely
+		 * to be true due to the hashing, though not certain.
+		 * For names with long matching prefixes, a call to strcmp()
+		 * would usually be faster, since strcmp() should realy be
+		 * written in assembler.
+		 */
+		p = (unsigned char *)name;
+		q = (unsigned char *)sp->name;
+		while(!(c = *p - *q++) && *p++)
+			;
+		if(!c)
+			return sp;
+#endif
+		if(c > 0)
+			break;
+		spp = &sp->next;
+	}
+	if(!create)
+		return NULL;
+	if(!sym_remain) {
+		sym_buffer = safe_malloc(128 * sizeof(Symbol));
+		sym_remain = 128;
+		/* alignment considerations thrown to the winds... this is ok on
+		 * the 68k, which is where this program will most likely remain.
+		 */
+	}
+	sym_remain--;
+	sp = sym_buffer++;
+	sp->next = *spp;
+	*spp = sp;
+	strcpy(sp->name, name);
+	if(strlen(name) > maxsymnamelen)
+		maxsymnamelen = strlen(name);
+	sp->undefined = 1;
+	sp->external = 0;
+	sp->used = 0;
+	sp->base = NULL;
+	sp->offset = 0L;
+	sp->relchain = NULL;
+	undefined++;
+	symcount++;
+	return sp;
+}
+
+/*
+ * Calculate interesting numbers about hash table
+ * The mean chain length will rise with the number of symbols,
+ * but the smaller, the better. The standard deviation is
+ * much the same.
+ * This only appears with the -v flag.
+ */
+void hash_stats(void)
+{
+	int i;
+	long chainlength[HASHES];
+	long vcount = 0;
+	long empty = 0;
+	double mean, variance, sd;
+
+	if(!symcount)
+		return;
+	for(i = 0; i < HASHES; i++) {
+		Symbol *sp;
+
+		chainlength[i] = 0;
+		if(!(sp = symbols[i]))
+			empty++;
+		else while(sp) {
+			chainlength[i]++;
+			sp = sp->next;
+		}
+	}
+	mean = (double)symcount / HASHES;
+	for(i = 0; i < HASHES; i++) {
+		long x = chainlength[i];
+		vcount += x * x;
+	}
+	variance = (double)vcount / HASHES - mean * mean;
+	sd = sqrt(variance);
+	fprintf(stderr, "Total symbols .................... %ld\n", symcount);
+	fprintf(stderr, "Undefined symbols ................ %ld\n", undefined);
+	fprintf(stderr, "External symbols ................. %ld\n", externals);
+	fprintf(stderr, "Empty hash entries ............... %ld/%ld\n", empty, (long)HASHES);
+	fprintf(stderr, "Mean hash chain length ........... %G\n", mean);
+	fprintf(stderr, "Standard deviation ............... %G\n", sd);
+	fprintf(stderr, "Scaled mean hash chain length .... %G\n", mean / symcount);
+	fprintf(stderr, "Scaled standard deviation ........ %G\n", sd / symcount);
+}
+
+/*
+ * Find a section, create if necessary.
+ * UDATA is rather special --- it has to go at the end of the
+ * list.
+ */
+Section *findsection(char *pname)
+{
+	char name[NAMELENGTH+1];
+	Section *sp, **spp;
+	int l;
+
+	if(!pname) {
+		spp = &sections;
+		while(sp = *spp)
+			spp = &sp->next;
+		return *spp = &udata;
+	}
+
+	if(*pname == '.' && dottrans)
+		*pname = '_';
+
+#ifdef DEBUG
+	fprintf(stderr, "findsection(\"%s\");\n", pname);
+#endif
+
+	if(caseind) {
+		unsigned char *p = (unsigned char *)name, *q = (unsigned char *)pname;
+
+		while(*p++ = (toupper)(*q++))
+			;
+	} else
+		strcpy(name, pname);
+	if(!strcmp(name, "UDATA"))
+		return &udata;
+	spp = &sections;
+	while(sp = *spp) {
+		if(!strcmp(sp->name, name))
+			return sp;
+		spp = &sp->next;
+	}
+	*spp = sp = safe_malloc(sizeof *sp);
+	sp->next = NULL;
+	strcpy(sp->name, name);
+	if((l = strlen(name)) > 8) {
+		sp->colwidth = l;
+		if(l > maxsecnamelen)
+			maxsecnamelen = l;
+	} else
+		sp->colwidth = 8;
+	sp->contents = NULL;
+	sp->common = 0;
+	return sp;
+}

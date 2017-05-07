@@ -1,0 +1,12 @@
+/*
+ * CC Wrapper
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+#define CC
+char sym;
+char map;
+
+#include "main.c"
+

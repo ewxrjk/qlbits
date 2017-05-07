@@ -1,0 +1,187 @@
+/*
+ * CC/XCC bits and pieces
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#ifdef XCC
+char _prog_name[] = "XCC";
+#else
+char _prog_name[] = "CC";
+#endif
+static struct phase_opt {
+	struct phase_opt *next;
+	char type;
+	char *path;
+} *opt_list;
+char *c68path;
+char *tmppath;
+char *comnam;
+char combuf[512];
+char ccverbose;
+int execute(int);
+char *createname(char *, char *, char *);
+char *progfilename(char *);
+int xmatch(char *, char *);
+struct {
+	char prefix;
+	char type;
+	char *name;
+} options[] = {
+	0, 0, "-P",
+	0, 0, "-C",
+	1, 0, "-I",
+	1, 0, "-D",
+	1, 0, "-U",
+	1, 1, "-warn=",
+	0, 1, "-warn",
+	0, 1, "-list",
+	0, 1, "-reg",
+	0, 1, "-noreg",
+	0, 1, "-opt",
+	0, 1, "-noopt",
+	0, 1, "-short",
+	0, 1, "-noshort",
+	0, 1, "-peep",
+	0, 1, "-nopeep",
+	0, 1, "-label",
+	0, 1, "-nolabel",
+	0, 1, "-icode",
+	0, 1, "-unsigned",
+	1, 3, "-bufp",
+	1, 3, "-bufl",
+};
+#define OPTIONS (sizeof options / sizeof *options)
+
+static void usage(void)
+{
+	fprintf(stderr, "%s %s (c) 1993 Richard Kettlewell\n\n", _prog_name, _version);
+	fputs("Usage:\n", stderr);
+	fputs("    CC [-chpsv] [-m[s]] [-o output] [-L path] [-Dsymbol[=defn]]\n", stderr);
+	fputs("       [-I path] [-Qoption] [-g path] file ... [-lr library]\n\n", stderr);
+	fputs("    -p    Stop at _i files              -D    Define cpp symbol\n", stderr);
+	fputs("    -s    Stop at _s files              -I    Define include path\n", stderr);
+	fputs("    -c    Stop at _o files              -Q    C68 option\n", stderr);
+	fputs("    -h    This help                     -g    Program path\n", stderr);
+	fputs("    -v    List commands                 -l    Scan library\n", stderr);
+	fputs("    -o    Set output file               -r    Scan rtm definition\n", stderr);
+	fputs("    -m    Generate map                  -ms   Map + symbol table\n", stderr);
+	fputs("\nSome C68 options also work.\n", stderr);
+}
+
+/*
+ * Make a (bad) guess at the 'base name' of a file.
+ * The 'right' way to do it is to parse out .._ and ._
+ * and then try to open the file as a directory to
+ * find out the name of the directory that it is in.
+ */
+char *basename(char *name)
+{
+	char *p;
+
+	if(!*name)
+		return name;
+	p = name + strlen(name) - 1;
+	while(p >= name && *p != '_')
+		p--;
+	if(p <= name)
+		return name;
+	p--;
+	while(p >= name && *p != '_')
+		p--;
+	return 1+p;
+}
+
+/*
+ * Create a new name for a (temporary) file.
+ * The memory used only gets free()d when cc dies.
+ */
+char *createname(char *path, char *name, char *extn)
+{
+	char *result;
+	char *p;
+
+	if(path) {
+		result = safe_malloc(strlen(path)+strlen(name)+strlen(extn)+2);
+		strcpy(result, path);
+		strcat(result, basename(name));
+	} else {
+		result = safe_malloc(strlen(name)+strlen(extn)+2);
+		strcpy(result, name);
+	}
+	if(p = strrchr(result, '_'))
+		strcpy(p+1, extn);
+	else {
+		strcat(result, "_");
+		strcat(result, extn);
+	}
+	return result;
+}
+
+/*
+ * Execute a command and --- if there's an error --- find out
+ * what the user wants to do about it.
+ * Currently assumes you want to stop compiling, this may change.
+ */
+int execute(int ignored)
+{
+	char *progname;
+	int code;
+	int execl(char *, int *, char *, ...);
+
+	if(ccverbose)
+		fprintf(stderr, "  %s %s\n", comnam, combuf);
+	if(!(progname = progfilename(comnam))) {
+		fprintf(stderr, "Couldn't find %s\n", comnam);
+		return -1;
+	}
+	code = execl(progname, (int *)-1, comnam, combuf, NULL);
+	if(code) {
+		fprintf(stderr, "%s returned status code %d\n", comnam, code);
+		return -1;
+	}
+	return 0;
+}
+
+/*
+ * Search for a program on the path; find the FULL name.
+ * A path may have either : or ; separating directories.
+ */
+char *progfilename(char *base)
+{
+	static char buffer[64];
+
+	int extra;
+	int fd;
+	char *p, *q;
+	
+	if(isdevice(base, &extra) && (extra & DIRDEV))
+		return base;
+	p = c68path;
+	/* maybe c68path = PROG_USE, maybe not */
+	while(*p) {
+		q = buffer;
+		while(*p && *p != ';' && *p != ':')
+			*q++ = *p++;
+		strcpy(q, base);
+		if((fd = open(buffer, O_RDONLY)) > 0) {
+			close(fd);
+			return buffer;
+		}
+		if(*p)
+			p++;
+	}
+	return NULL;
+}
+
+int xmatch(char *name, char *extn)
+{
+	char *p;
+
+	if(p = strrchr(name, '_'))
+		return !strcmp(p+1, extn);
+	else
+		return 0;
+}
+
+
+

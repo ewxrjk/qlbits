@@ -1,0 +1,38 @@
+********************************************************************************
+* Demo RTM [2]                                       (c) 1993 Richard Kettlewell
+*
+         xdef     .RTMDEF
+*
+* Only one routine here, this file is to demonstrate principals rather
+* than do anything really useful
+*
+         section  TEXT
+*
+cls      moveq    #$20,d0
+         moveq    #-1,d3
+         trap     #3
+         tst.l    d0
+         rts
+*
+         section  DATA
+*
+.RTMDEF  dc.l     0
+         dc.l     0
+         dc.b     3,'ASM'                    ; Name space
+*
+* Sorted table for rtm_rext
+*
+         dc.l     0
+         dc.l     cls
+         dc.b     3,'CLS'
+         dc.l     0
+         dc.l     0
+*
+         section  RTM
+*
+* (Maybe not sorted) table for LNK
+*
+         dc.b     3,'CLS'
+         dc.b     0
+*
+         end

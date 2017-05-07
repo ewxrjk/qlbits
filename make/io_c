@@ -1,0 +1,150 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* io and system calls */
+#include "make.h"
+#include <stdio.h>
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdlib.h>
+
+/*
+ * Input a line from the makefile. Return non-zero on end of file.
+ * Performs certain transformations:-
+ *		Deletes # comments
+ *		Deletes C style comments
+ *		Deletes C++ style comments
+ *		Strips leading and trailing space
+ */
+int inputline(Line lp)
+{
+	int c;
+	static char ccomment;
+	char lcomment = 0;
+
+	lp->length = 0;
+	c = fgetc(input);
+	if(c == EOF)
+		return -1;
+	while(c != EOF && c != '\n') {
+		if(ccomment) {
+			if(c == '*') {
+				int d = fgetc(input);
+
+				if(d == '/') {
+					ccomment = 0;
+					c = ' ';
+					goto insert_character;
+				} else
+					c = d;
+			} else
+				c = fgetc(input);
+		} else if(lcomment)
+			c = fgetc(input);
+		else {
+			if(c == '/') {
+				int d = fgetc(input);
+
+				if(d == '*') {
+					ccomment = -1;
+					c = fgetc(input);
+					continue;
+				} else if(d == '/') {
+					lcomment = -1;
+					c = fgetc(input);
+					continue;
+				} else if(d != EOF)
+					ungetc(d, input);
+			} else if(c == '#') {
+				lcomment = -1;
+				c = fgetc(input);
+				continue;
+			} else if(c == '\\') {
+				int d = fgetc(input);
+
+				if(d = '\n') {
+					c = fgetc(input);
+					continue;
+				} else if(d != EOF)
+					ungetc(d, input);
+			}
+insert_character:
+			if(isspace(c))
+				c = ' ';
+			if(lp->length != 0 || c != ' ')
+				l_putc(lp, c);
+			c = fgetc(input);
+		}
+	}
+	while(lp->length > 0 && lp->text[lp->length-1] == ' ')
+		lp->length--;
+	l_fputc(lp, 0);
+	return 0;
+}	
+
+/*
+ * Report an error
+ */
+void error(char *rep, char *line, int pos, ...)
+{
+	va_list ap;
+
+	if(line) {
+		puts(line);
+		if(pos >= 0) {
+			while(pos-- > 0)
+				fputc(' ', stdout);
+			fputc('|', stdout);
+			fputc('\n', stdout);
+		}
+	}
+	va_start(ap, pos);
+	vprintf(rep, ap);
+	va_end(ap);
+	fputc('\n', stdout);
+}
+
+void dump_command(struct command *c)
+{
+	while(c) {
+		fputs("    ", stdout);
+		if(c->ignore)
+			fputc('-', stdout);
+		if(c->quiet)
+			fputc('@', stdout);
+		puts(c->command);
+		c = c->next;
+	}
+}
+
+/*
+ * Add character c to line lp
+ * Since Line is an array type, it is passed by reference
+ */
+int l_fputc(Line lp, int c)
+{
+	if(lp->length >= lp->size) {
+		if(!(lp->text = realloc(lp->text, (size_t)(lp->size += 64)))) {
+			fputs(messages[MSG_MEM], stderr);
+#if QDOS || __QDOS__
+			exit(-3);
+#else
+			exit(EXIT_FAILURE);
+#endif
+		}
+	}
+	return lp->text[lp->length++] = c;
+}

@@ -1,0 +1,278 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* makefile parsing */
+#include "make.h"
+#include <ctype.h>
+#include <string.h>
+#include <limits.h>
+
+void free(void *);
+
+static char errorflag;
+static struct command *inputcommands(void);
+
+struct fname {
+	struct fname *next;
+	char *name;
+};
+
+#if FASTFNCHAR
+#define isfnchar(C) fntab[(unsigned char)(C)]
+
+static char fntab[UCHAR_MAX+1];
+
+void analyse_init(void)
+{
+	int c;
+	for(c = 1; c <= UCHAR_MAX; c++)
+		if(!isspace((unsigned char)c))
+			fntab[c] = 1;
+	fntab[':'] = 0;
+	fntab['='] = 0;
+	fntab['-'] = 0;
+}
+#else
+static int isfnchar(int c)
+{
+	return !isspace((unsigned char)c) && c != ':' && c != '=' && c != '-' && c != 0;
+}
+#endif
+
+static struct fname *getnames(char **pp)
+{
+	char *p = *pp, *q;
+	struct fname *ibase, *ip, **ipp;
+
+	ibase = NULL;
+	ipp = &ibase;
+	while(isfnchar(*p)) {
+		q = p++;
+		while(isfnchar(*p))
+			p++;
+		*ipp = NEW(ip);
+		ip->next = NULL;
+		ipp = &ip->next;
+		ip->name = safe_malloc((size_t)(p - q + 1));
+		strncpy(ip->name, q, (size_t)(p - q));
+		ip->name[p - q] = 0;
+		while(isspace((unsigned char)*p))
+			p++;
+	}
+	*pp = p;
+	return ibase;
+}
+
+static void free_names(struct fname *f)
+{
+	struct fname *g;
+
+	while(g = f) {
+		f = f->next;
+		free(g->name);
+		free(g);
+	}
+}
+
+/*
+ * Analyse the makefile
+ */
+int analyse(void)
+{
+	char *p;
+	int c;
+
+	analyse_init();
+
+	while(!inputline(rawinput)) {
+		expandmacros(rawinput->text, expanded, NULL, NULL, 1);
+		p = expanded->text;
+		c = *p;
+		if(c == EXTCHAR) {
+			char from[16], to[16];
+			int i;
+			char truncated = 0;
+			struct template *t;
+
+			/* new template */
+			p++;
+			c = *p++;
+			i = 0;
+			while(isfnchar(c) && c != EXTCHAR) {
+				if(i < 16)
+					from[i++] = c;
+				else
+					truncated = -1;
+				c = *p++;
+			}
+			from[i] = 0;
+			if(truncated)
+				error(messages[MSG_EXTENSIONTRUNC], expanded->text, p - expanded->text - 1);
+			if(c != EXTCHAR) {
+				error(messages[MSG_TEMPLATESYNTAX], expanded->text, p - expanded->text - 1);
+				errorflag = -1;
+				continue;
+			}
+			c = *p++;
+			i = 0;
+			while(isfnchar(c) && c != EXTCHAR) {
+				if(i < 16)
+					to[i++] = c;
+				else
+					truncated = -1;
+				c = *p++;
+			}
+			to[i] = 0;
+			if(truncated)
+				error(messages[MSG_EXTENSIONTRUNC], expanded->text, p - expanded->text - 1);
+			if(c == EXTCHAR) {
+				error(messages[MSG_TEMPLATESYNTAX], expanded->text, p - expanded->text - 1);
+				errorflag = -1;
+				continue;
+			}
+			while(isspace((unsigned char)c))
+				c = *p++;
+			if(c != ':') {
+				error(messages[MSG_COLONEXPECTED], expanded->text, p - expanded->text - 1);
+				errorflag = -1;
+			} else
+				c = *p++;
+			if(c) {
+				error(messages[MSG_NEWLINEEXPECTED], expanded->text, p - expanded->text - 1);
+				errorflag = -1;
+			}
+			t = define_template(from, to);
+			t->command = inputcommands();
+		} else if(isfnchar(c)) {
+			struct fname *fl, *al, *fp, *ap;
+			struct target *t, *at;
+			struct command *com;
+			
+			if(!(fl = getnames(&p))) {
+				error(messages[MSG_NAMESEXPECTED], expanded->text, p - expanded->text);
+				errorflag = -1;
+				continue;
+			}
+			c = *p++;
+			while(isspace((unsigned char)*p))
+				p++;
+			switch(c) {
+				/* a rule */
+				case ':':
+					al = getnames(&p);
+					if(*p) {
+						error(messages[MSG_NEWLINEEXPECTED], expanded->text, p - expanded->text);
+						errorflag = -1;
+					}
+					com = inputcommands();
+					for(fp = fl; fp; fp = fp->next) {
+						t = define_target(fp->name);
+						if(t->primary)
+							t = t->primary;
+						if(al) {
+							newdepend(t);
+							for(ap = al; ap; ap = ap->next) {
+								at = define_target(ap->name);
+								makedepend(t, at);
+							}
+							t->current->command = com;
+						} else
+							t->command = com;
+					}
+					break;
+
+				/* define a macro */
+				case '=':
+					if(fl->next) {
+						error(messages[MSG_MULTIPLEMACROS], expanded->text, -1);
+						errorflag = -1;
+						break;
+					}
+					define_macro(fl->name, p, 0);
+					break;
+
+				/* define secondaries */
+				case '-':
+					if(fl->next) {
+						error(messages[MSG_MULTIPLEPRIMARIES], expanded->text, -1);
+						errorflag = -1;
+						break;
+					}
+					t = define_target(fl->name);
+					while(t->primary)
+						t = t->primary;
+					if(!(al = getnames(&p))) {
+						error(messages[MSG_0SECONDARIES], expanded->text, p - expanded->text - 1);
+						errorflag = -1;
+						break;
+					}
+					if(*p) {
+						error(messages[MSG_NEWLINEEXPECTED], expanded->text, p - expanded->text);
+						errorflag = -1;
+					}
+					for(fp = al; fp; fp = fp->next) {
+						at = define_target(fp->name);
+						if(at->primary) {
+							error(messages[MSG_GOTPRIMARY], expanded->text, -1, fp->name);
+							errorflag = -1;
+						}
+						at->primary = t;
+					}
+					free_names(al);
+					break;
+
+				/* do what? */
+				default:
+					error(messages[MSG_SYNTAX], expanded->text, p - expanded->text - 1);
+					errorflag = -1;
+					break;
+			}
+			free_names(fl);
+		}
+	}
+	return errorflag;
+}
+
+static struct command *inputcommands(void)
+{
+	struct command *cp, **cpp, *com;
+	char *p;
+
+	com = NULL;
+	cpp = &com;
+	while(!inputline(rawinput) && rawinput->text[0] != 0) {
+		expandmacros(rawinput->text, expanded, NULL, NULL, 0);
+		p = expanded->text;
+		*cpp = NEW(cp);
+		cp->next = NULL;
+		cpp = &cp->next;
+		cp->quiet = cp->ignore = 0;
+		while(*p == '@' || *p == '-') {
+			if(*p++ == '@')
+				cp->quiet = -1;
+			else
+				cp->ignore = -1;
+		}
+		while(isspace((unsigned char)*p))
+			p++;
+		if(!*p) {
+			error(messages[MSG_EMPTYCOMMAND], expanded->text, p - expanded->text);
+			errorflag = -1;
+		}
+		cp->command = safe_strdup(p);
+	}
+	return com;
+}

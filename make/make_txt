@@ -1,0 +1,1369 @@
+Ql Make
+=======
+
+(c) 1993 Richard Kettlewell
+
+
+Contents
+
+	1	Introduction
+	2	Using Make
+	3	Special Characters
+	4	Advanced Features
+	5	-p Output
+	6	Hints and Tips
+	7	Problems
+
+Appendices
+
+	A	History
+	B	The Make Algorithm
+	C	Copyright Notice
+
+
+1 Introduction
+
+1.1 Make
+
+This version of MAKE was written from scratch to replace the MAKE
+utility supplied with C68, because I didn't like it very much. It has
+since undergone one major rewrite and one minor one, both of which
+radically affected functionality.
+
+The purpose of MAKE is to automate the repeated re-compilation that
+occurs during software development; the programmer describes the
+relationships between various source and object files in a "Makefile"
+which is read by MAKE; MAKE then decides what needs to be done to bring
+everything 'up to date.'
+
+For example, a large C program may be split into a dozen or more C
+source files; each has a corresponding object file, there may be some
+header files which are included by some or all of the source files and
+there is also the executable program at the 'end' of this lot.
+
+The programmer makes a change to one header file; s/he does not want to
+work out which source files include it, recompile them and recompile the
+whole lot: just run MAKE and everything is done for you (provided you
+got the makefile right...)
+
+The makefile, incidentally, is assumed by MAKE to have the filename
+'makefile' and to be in the current data directory. It can be
+constructed using any text editor; Quill is *not* suitable.
+
+Throughout the following, letter case is unimportant *unless* the
+programs executed by MAKE have specific requirements --- if they're Unix
+derived then they probably will. You needn't worry about letter case
+unless something actually goes wrong.
+
+Important note: macro names are currently case independent, but this
+will not remain the case. Any Makefile which relies on either case
+dependent or case independent behavious is liable to stop working at
+some point in the near future, or not work at present.
+
+1.2 Requirements
+
+You will need:
+
+	Toolkit 2
+	A disk drive
+	A battery backed clock
+	A Ql with at least 256K of RAM
+
+It may be possible to substitute commands from Turbo Toolkit for those
+from TK2 but you can't get any useful program development done on the Ql
+without TK2 anyway.
+
+If you're prepared to type in the date and time --- using SDATE --- at
+the start of each session then you can use the Qls internal clock which
+resets back to 1961 whenever you turn the machine off. (This clock can
+survive resets.)
+
+You can run make with less than 256K but even with that much it is
+debatable how much you can achieve that is useful. The following will be
+extremely useful, but not essential:
+
+	A working version of the env_bin file from C68
+	The pointer interface
+	More RAM
+	Another disk drive
+
+1.3 Execution
+
+MAKE may be executed using one of the usual Toolkit 2 commands as
+follows:
+
+	EX make;'{<option>} {<target>}'
+	EW make;'{<option>} {<target>}'
+
+If you have a shell of some sort, you could also use (depending on the
+particular shell) a command like:
+
+	make {<option>} {<target>}
+
+In each case, the {} indicate that the surrounded item may be repeated
+or ommitted. A <target> is just a filename; an <option> is one of the
+following:
+
+	-f<filename>		Set makefile name (default "Makefile")
+	-n			Don't execute commands, just list them
+	-s			Don't list commands (i.e. 'quiet' make)
+	-p			Dump extra information after MAKE finished
+	-e			Environment names override all macro
+				definitions except command line
+	<name>=<definition>	Define a macro. Overrides built-in and
+				environment macros.
+	-i			Ignore errors when executing commands
+	-x<filename>		Automake <filename> --- see 4.4
+	-X			Assume cc can do _x files correctly
+	-r			Don't define built in rules
+
+Examples:
+
+	make
+	make -np
+	make install
+	make -s -fql_makefile
+	make cc=gcc
+
+Don't worry if some or all of this is rather mysterious for the moment.
+
+Specifying a target on the command line tells MAKE to re-make that
+target if it is out of date. If no targets are specified on the command
+line then the first target in the makefile is used.
+
+In practice, the -f option is probably more useful when debugging MAKE
+itself than at any other time. It is permitted to leave a space between
+-f or -x and their arguments.
+
+The -X option alters the rule used to compile _x files to call CC
+instead of calling cpp and as68 directly; the version of CC I got with
+C68 couldn't do these files properly but more recently I wrote one that
+could.
+
+Important note: these options are NOT the same as the Unix make program.
+There are many other areas of difference as well.
+
+The following options are deprecated:
+
+	-q			Equivalent to -s
+
+1.4 Output
+
+Output is to the C stream 'stdout', that is to say, the screen; this may
+be redirected in the usual way, for example,
+
+	make ... >filename
+
+or
+
+	make ... >>filename
+
+Output may also be redirected by passing channels IDs to MAKE as
+performed by TK2's EX and EW commands, and others. For example,
+
+	ew make,#1
+	ew make,#1;'-n'
+
+1.5 Environment Variables
+
+Aside from their relationship with macros, there are a number of
+environment variables which are significant to MAKE. Some are
+undocumented for the moment but the others are as follows:
+
+	MAKEPATH	A list of directories in which programs which
+			MAKE is to call may be found. Each directory
+			name ends with an underscore and they names are
+			separated by ';' or ';' characters.
+
+			Examples:
+				flp1_;flp1_utils_;flp2_
+				ram1_:win1_:flp1_:flp2_
+
+	PATH		As MAKEPATH, but MAKEPATH is searched first.
+			After both MAKEPATH and PATH have been searched,
+			MAKE looks in the program directory.
+
+Neither of these need to be set for MAKE to function effectively.
+
+
+2 Using Make
+
+This section describes the contents of the makefile, which you will have
+to write to use MAKE.
+
+2.1 Rules
+
+A rule describes how to recreate a file when its source file(s) change.
+For example, the file main_o must be recompiled when main_c changes
+(assuming you are working in C.) A rule to do this is
+
+	main_o : main_c
+		cc -c -v main_c
+
+The spacing at the start of the command --- the second line --- is
+optional, but traditional. It makes it easier to see which lines are
+commands and which are not.
+
+The more general form is
+
+	target_name ... : dependent_name ...
+		command
+		...
+
+You must have 1 or more target names and 0 or more dependent names; you
+may have 0 or more commands, the last command being followed by a
+completely empty line. For the time being it may be best to always have
+exactly 1 target name.
+
+What this tells MAKE is that if (returning to the main_o example) main_o
+either does not exist, or main_c has been updated since main_o was last
+recompiled, then main_o must be recompiled using the given command,
+which is equivalent to
+
+	ew cc;'-c -v main_c'
+
+Any output from the called program is sent to MAKEs output file, which
+is what is most convenient. No extra window is opened.
+
+In the more general case, one or more dependent files may cause the
+target to be "remade" --- which means recompiled, reassembled, etc
+depending on the individual case --- using the supplied command(s).
+
+Important note: if there is one or more dependent file then the order in
+which they appear may be significant. This applies to targets listed on
+the command line as well.
+
+Important note: some other Make programs terminate a command list by a
+line not beginning with a tab character; a blank lines falls into this
+category but so do lines with no leading space. It is anticipated that
+the behaviour of MAKE will be altered at some time to follow this
+alternative convention. Be warned!
+
+2.2 Macros
+
+MAKE allows you to define a "macro" as a string of characters; for
+example,
+
+	c_compiler = cc
+	cflags = -v -warn
+
+This may be "expanded" or "substituted" at any later point in the file,
+for example:
+
+	main_o : main_c
+		$C_COMPILER -c $CFLAGS main_c
+
+which will be expanded to
+
+	main_o : main_c
+		cc -c -v -warn main_c
+
+In some cases, you may need to put brackets around the macro name, e.g.
+$(CC) instead of $CC, otherwise what you typed would be ambiguous. This
+will be very rare, however. (You can use $(CC), $[CC] or ${CC} ---
+whichever you like.) Note that some other MAKE programs require you to
+use brackets all the time --- if you do that, you're less likely to get
+an unpleasant surprise do introduce an otherwise ambiguous case.
+
+(They're ambiguous to people, not to the computer, which invariably gets
+it wrong. Example: "$PROG_USEcc" should be "$(PROG_USE)cc")
+
+If you define a macro containing another macro, for example,
+
+	fred = JOE is $(JOE)
+
+then joe is expanded immediately and not when fred is used. This is the
+simplest way of getting around problems of recursive macros; if you
+write:
+
+	JOE = fred
+	JOE = JOE is $(JOE)
+
+then the result is the same as writing
+
+	JOE = JOE is fred
+
+You can define macros on the command line, but if they contain spaces
+then you must put quotes around the whole definition. Also, you
+shouldn't put spaces around the = sign like you can in the makefile
+proper. The right way to do it is as follows:
+
+	make CFLAGS=-v "LDFLAGS=-bufp150K -ms"
+
+..and the wrong way:
+
+	make "CFLAGS = -v" LDFLAGS=-bufp150K -ms
+
+(The '-ms' bit will be regarded as separate argument by MAKE; the
+'clfags' option will define a macro with a space at the end of its name
+and you can't expand that in the makefile so it's not much use at all.)
+
+Further, macros defined on the command line must not contain commands to
+expand macros; they won't always get expanded (it rather depends where
+they appear, and the details here may change.)
+
+2.2.1 Special Macros
+
+A number of symbols have special meaning; they are:
+
+	$*	Current target (*without* extension)
+	$@	Current target
+	$<	Current dependent files
+	$?	Current dependent files which have been updated
+	$>	All dependent files
+	$!	All dependent files which have been updated
+	$$	$
+
+Note that you can't write $(*), ${$} etc --- it won't work, though I
+should think this is a prime area for improvement in future versions of
+MAKE.
+
+The point of some of these will become clear shortly; at the moment you
+will just have to take it on trust that they are useful. You need $$
+because otherwise, there's no way of putting a $ character into your
+Makefile which isn't assumed to have some special meaning.
+
+Assuming you have only given one rule for a target, $? expands to the
+dependent files for that target that have been altered since the target
+was altered --- which is all of them if the target doesn't exist. $<
+expands to the complete list of dependent files.
+
+The $! and $> macros are very similar, but become different when you have
+more than one rule for a target --- see section 4.
+
+2.2.2 Predefined Macros
+
+MAKE predefines some macros for convenience. If any environment
+variables with the same names are defined then their value take over:
+
+	Macro	Definition	Use
+
+	CC	cc		C compiler driver
+	CFLAGS	-warn=5 -D__C68__ -D__QDOS__ -D__MC68000__
+				Flags for compiler driver
+	AS	as68		Assembler for _s and _x files
+	AFLAGS			Assembler flags
+	ALIST			Assembler list output --- not used
+	CPP	cpp		C preprocessor
+	CPPASM	-P		CPP flags for preprocessing assembler
+				source
+	LD	cc		Linker
+	LDFLAGS			Linker flags
+	LDLIB			Libraries
+	RM	del		Delete command
+	RFLAGS	-r		Delete command flags
+	MAC	mac		Assembler for _asm files
+	MACFLAGS -errors	Assembler flags
+	MACLIST	con_		Assembler list output
+	TMP	tmp_		Filename prefix for temporary files
+				(e.g. ram1_tmp_)
+	YACC	bison		Yacc program
+	LEX	flex		Lex program
+	YFLAGS			Flags for $(YACC)
+	LFLAGS	-8		Flags for $(LEX)
+
+	DATA_USE		Current data directory
+	PROG_USE		Current program directory
+	SPL_USE			Current destinatiion directory
+
+These can be overridden by environment variables (unless you put -e on
+the MAKE command line), and by command line definitions, and by your own
+definitions. The old C, P and D macros are deprecated (i.e. they still
+work but they'll probably stop doing so one day.)
+
+The definition of LD as 'cc' is a trick to make sure that the correct
+linker is used whatever its name --- I now use one called LNK.
+Obviously, calling CC is undesirable if you actually know what linker
+you're using so I suggest you define the environment variable LD in your
+boot file with a line like
+
+	SETENV'LD=ld'
+or	SETENV'LD=lnk'
+
+In its current incarnation, MAKE is compiled with C68 and hence needs
+the env_bin file for environment variable support. Early versions of
+this file have a number of bugs and some don't work with Minerva: make
+sure that you have a recent version.
+
+There may be other predefined macros, either look in main_c or do 'make
+-np' to get a full list. Try looking in the predefined templates (in
+main_c) to see what they are used for.
+
+Note that the definition of CFLAGS defines macros that identify the C68
+system without falling foul of the name space restrictions of the
+ANSI/ISO C Standard, under which names such as QDOS and C68 must be
+available for use by programmers and therefore should not be predefined.
+
+2.3 Templates
+
+MAKE is designed to make life easier for lazy programmers and typing out
+all the commands necessary to remake a system is not very lazy. So a
+method exists for automating even this; one can set up a template (using
+a slightly unpleasant syntax) which describes how to remake, say, all C
+source files.
+
+2.3.1 Defining Templates
+
+A template describes how to make a file from one extension to another.
+For example,
+
+	_c_o:
+		$CC -c $CFLAGS $<
+
+describes how to recompile C source files (which end in _c) to get the
+corresponding object files (which end in _o.)
+
+As another example,
+
+	_asm_rel:
+		mac $< con_ $@ -errors
+
+could be used to reassemble files with GSTs Macro Assembler; you would
+need a version which knew about default directories for this to work,
+though. If you have the older version then you have to use
+
+	_asm_rel:
+		mac $(DATA_USE)$< con_ $(DATA_USE)$@ -errors
+
+which is inelegant but will work, unless you specify full filenames in
+the makefile.
+
+If you have a target such as
+
+	prog: fred_o joe_o
+		$LD $LDFLAGS -oprog fred_o joe_o
+
+then MAKE will use the above _c_o template --- which is in fact built
+into MAKE along with one or two others --- to try and determine what you
+really want done. It will create the rules
+
+	fred_o: fred_c
+		$CC -c $CFLAGS $<
+
+	joe_o: joe_c
+		$CC -c $CFLAGS $<
+
+internally --- you can see them if you put -p on the MAKE command line
+--- and use those to remake fred_o and joe_o as required.
+
+This demonstrates the usefulness of $<; the other special macros have
+similar uses. The above will, assuming the default definitons for cc and
+cflags, become
+
+	fred_o: fred_c
+		cc -c -v -Qnowarn fred_c
+
+	joe_o: joe_c
+		cc -c -v -Qnowarn joe_c
+
+which is what we want.
+
+2.3.2 Using Templates
+
+It is sometimes necessary to give MAKE a hint as to what template to
+choose. It is sufficient to ensure that the 'source' file for the target
+in question either exists, or is mentioned in the Makefile in a rule.
+
+In the case of most C programs, the _c files will exist and so MAKE can
+guess correctly how to build the _o file. However, some C source files
+are generated by programs such as Flex and Bison, and it is possible to
+construct templates for these.
+
+For example, scan_o is the compiled form of scan_c, which might be
+produced from scan_l by Flex. If you only ever mention scan_o in the
+Makefile then MAKE finds no scan_c on the disk and gets stuck. If,
+however, you put in a line like
+
+	scan_c : scan_l
+
+then MAKE will correctly apply the Flex rule, assuming one is defined.
+In fact, since scan_l will in general always exist, it is enough to
+mention scan_c as follows:
+
+	scan_c :
+
+MAKE will then use scan_c to build scan_o and since scan_c has no
+commands, it will attempt to apply templates to it. Since scan_l exists
+as a file, the correct template will be chosen. However, I recommend
+that you make the dependence explicit as in the first example.
+
+2.3.3 Built-in Templates
+
+The following templates are built in:
+
+	_s_o:
+		$(AS) $(AFLAGS) $< $@
+
+	asm_rel:
+		$(MAC) $< $(MACLIST) $@ $(MACFLAGS)
+
+	_c_o:
+		$(CC) -c $(CFLAGS) $<
+
+	_l_c:
+		$(LEX) -t $(LFLAGS) $< >$@
+		
+	_y_c:
+		$(YACC) -d $(YFLAGS) -o $@ $<
+
+	_x_o:
+		$(CPP) $(CPPASM) $< $(TMP)$*_s
+		$(AS) $(AFLAGS) $(TMP)$*_s $@
+		@$(RM) $(TMP)$*_s
+
+If you put -X on the command line, the _x_o template becomes:
+
+	_x_o:
+		$(CC) -c $(CFLAGS) $(CPPADEFS) $<
+
+There may be other templates built in. Either do 'make -np' or look at
+main_c to find out what they are. Note that the _y_c template is not
+suitable for use with Yacc, since that program doesn't have the -o
+option (unless, of course, you have a modified version of Yacc.) Bison,
+however, works. I wouldn't know if the _l_c template works with the
+original Lex, since I only have Flex.
+
+MAKE can usually determine which template to use (with even just the
+built in ones, there are three different ways of getting an _o file) by
+examining the disk to see which of the files exist. It also searches
+the targets that it knows about.
+
+So if it wants to make fred_o, it tries to determine which of fred_s,
+fred_x or fred_c have the best chance of existing. If there is actually
+a file of one of these names, that is the obvious choice; it also looks
+for targets with these names (in doing so it creates them, as you can
+see with -p.) If the target existed before MAKE looked for it then
+that's the one it uses.
+
+There may be room for improvement in MAKEs actions in this area, let me
+know if you have problems doing something.
+
+
+3 Special Characters
+
+3.1 Comments
+
+A comment is introduced by a # sign, and lasts to the next newline
+character. The entire comment is ignored; for example,
+
+	main_o : main_c			# the executive
+
+You may also use C style comments like
+
+	main_o : main_c			/* the executive */
+
+which can extend over many lines, and do *not* nest, or BCPL style
+comments like
+
+	main_o : main_c			// the executive
+
+if you prefer. (This type of comment is sometimes referred to as C++
+style, but BCPL had them long before C or C++ ever existed.)
+
+3.2 Line Splicing
+
+A line may be joined to the next by placing a \ character as the last
+character before the newline.
+
+For example,
+
+	main_o :\
+		main_c
+
+is the same as
+
+	main_o :	main_c
+
+Tab characters as used here are treated identically to spaces.
+
+3.3 Error Supression
+
+When an external command is executed, it returns a numeric error code (0
+for ok.) Under normal circumstances, if this error is non-zero then MAKE
+will report the error and cease execution.
+
+If a command starts with the '-' character, however, then any error
+returned is reported, but execution then continues as if no error had
+occured.
+
+This is of greatest use when a program doesn't return a proper exit
+code.
+
+3.4 Silent Execution
+
+If the first character of a command is the '@' character then it will
+not be displayed when it is executed.
+
+The '-' and '@' flags may be combined in any order.
+
+
+4 Advanced Features
+
+I've added a couple of extra features beyond what normal MAKE programs
+do; other implementations may do the same things in different ways, or
+not at all.
+
+To get the following example to work properly, I had to add a couple of
+extra features:
+
+	object = main_o lex_yy_o ytab_o
+
+	prog : $(OBJECT)
+		$(LD) $(LDFLAGS) -oprog $(OBJECT)
+
+	lex_yy_o : ytab_h
+
+	lex_yy_c : prog_l
+		flex -i8 prog_l
+
+	ytab_c : prog_y
+		yacc -vd prog_y
+
+If you're unfamiliar with Yacc and Lex/Flex then it may be necessary to
+explain a bit what is going on.
+
+The program Yacc takes prog_y as its input and produces the files ytab_c
+and ytab_h; Flex produces lex_yy_c from prog_l, and lex_yy_c contains
+--- in this example --- the line
+
+	#include "ytab.h"
+
+...among others. The problem is that when ytab_h is recreated, lex_yy_o
+must be recreated.
+
+However, the above makefile doesn't even say when ytab_h is recreated!
+We can't put
+
+	ytab_h : prog_y
+		yacc -vd prog_y
+
+because then Yacc will be run twice --- hardly efficient. I here
+describe the solutions to both these (linked) problems, in
+(approximately) reverse order.
+
+4.1 Multiple Command Lists
+
+One problem I encountered with earlier versions of MAKE was that the
+above, when it tried to re-make lex_yy_o, used a command like
+
+	$(CC) $(CFLAGS) ytab_h lex_yy_c
+
+...because lex_yy_o didn't exist; it existed then there would only be
+a problem when ytab_h was more recent.
+
+The solution is for dependent files to have different command lists;
+only those responsible for the re-make then have their commands
+executed.
+
+So in the above we put
+
+	lex_yy_o : ytab_h
+
+	lex_yy_c : prog_l
+		flex -i8 prog_l
+
+instead of the definitions for lex_yy_o and lex_yy_c. The order is
+significant since it describes the order in which the commands appear.
+Note that the $< macro will expand to nothing if it is not the 'current'
+dependent list causing re-make.
+
+The commands added by template application are always executed *after*
+all directly specified commands.
+
+This feature is why $! and $> were added; they refer to *all* dependent
+files, not just those relating to the rule from which the command in
+which they are being expanded was defined.
+
+4.2 Secondary Outputs
+
+This feature is supposed to make life easier when a command executed by
+MAKE produces several output files each of which is a dependent file for
+some other target.
+
+In the above, Yacc produces output ytab_c and ytab_h; these are required
+by various other files. To indicate this, I added an extra line:
+
+	ytab_c - ytab_h
+
+This is of the general form
+
+	primary - secondary
+
+where secondary is a list of secondary files (much like a dependent
+list.) What it tells MAKE is that when ytab_c is re-made, ytab_h is
+automatically re-made as well.
+
+(Incidentally, Flex writes lexical analysers --- 'scanners' and Yacc
+writes parsers. I can supply Ql versions of both, likewise Bison which
+is a more modern version of Yacc.)
+
+4.3 Multiple Targets
+
+(Other MAKEs can do this quite happily, but this is a new feature with
+v2.0 with mine.)
+
+You can put multiple targets in a rule. For example,
+
+	object = prg1_o prg2_o prg3_o
+
+	prg: $OBJECT
+		$LD $LDFLAGS -oprg $OBJECT
+
+	$OBJECT: prg_h
+
+specifies that 'prg' should be relinked if any of prg[123]_o are
+recompiled, and that these should be recompiled either if the source
+files for them change (using the built in _c_o rule) or if prg_h is
+changed.
+
+The notation $OBJECT: prg_h is synonymous in this case with
+
+	prg1_o: prg_h
+
+	prg2_o: prg_h
+
+	prg3_o: prg_h
+
+but it's a lot shorter and therefore in most situations superior.
+
+4.4 Automake
+
+A feature I added in some spare time is what I call 'automake'. You call
+make like this
+
+	make -xfred
+
+and an extra rule is created of the form
+
+	fred: fred_o
+		$(LD) $(LDFLAGS) -o$@ $> $(LDLIB)
+
+The $@ macro will expand to fred, and $> will expand to fred_o (plus
+anything that fred depends on after the makefile has been analysed.) The
+idea is to simplify compilation of single file programs.
+
+
+5 -p Output
+
+The -p output lists MAKEs internal data structures in a readable form to
+the standard output.
+
+5.1 Macros
+
+All macros are listed in alphabetical order of name in the form
+
+	name = definition
+
+There is always exactly 1 space either side of the = character which is
+*not* part of the name or definition. Note that environment variables
+are not listed here.
+
+5.2 Targets
+
+All primary targets are listed in alphabetical order, with associated
+commands. If a target has multiple dependent file lists, the target
+appears more than once. All secondaries of each primary target are
+listed, so every target gets listed somewhere.
+
+The format used is that of rules in makefiles.
+
+5.3 Templates
+
+All templates are listed, again in the same format as found in the
+makefile. If two templates share the same pair of extensions then the
+one that gets used is the on that is earlier in the list.
+
+
+6 Hints and Tips
+
+A few comments that might help.
+
+-	If you're not sure what MAKE will do in a given situation, use a
+	command like
+
+		make -n
+
+	to list the commands it will execute without actually doing
+	them. In SuperBASIC notation,
+
+		ex make;'-n'
+
+	or
+
+		ew make,#1;'-n'
+	
+-	If you have the Pointer Interface then you can save memory by
+	forcing MAKE to use an existing window rather than opening its
+	own; for example, use commands like
+
+		ew make,#1
+		ew make,#1;'-n'
+
+	instead of
+
+		ex make
+		ex make;'-n'
+
+	This reduces memory use to the level of systems without
+	ptr_gen. I quite often do
+	
+		ex make,#1
+	
+	and so forth, so that I can still use SuperBASIC without going
+	to the trouble of multib_exe-ing another one. You can make a
+	real mess by interleaving SuperBASIC and MAKE output to channel
+	#1 that way, though.
+
+-	If you use EX instead of EW then you can stop MAKE in its tracks
+	with a SuperBASIC command like 'RJOB MAKE' (with TK2; other
+	toolkit have similar commands with different names and/or
+	syntax) to stop MAKE and any programs it has called. Any
+	temporary files created will be left lying around but they'll
+	get deleted at the end of the next succesful compile.
+
+	The QPAC2 RJOB and JOBS menus let you do the same whichever way
+	you started MAKE. Other 'front ends' doubtless provide similar
+	facilities.
+
+-	You can run MAKE from MicroEMACS using the ^X$ command (aka
+	execute-program) if your version has that -- I can supply a
+	version that does; normally you would just type make<ENTER>
+	after this and then, when the "[End]" message comes up, hit a
+	key to go back to EMACS. (Not a function key, there's a bug.)
+
+-	If you are creating header dependencies, you may reduce the
+	number of remakes by splitting the header concerned into several
+	parts and writing the dependencies on that bases (as I have done
+	with MAKE itself.)
+
+	Anything that, when changed, requires everything to be
+	recompiled (e.g. a data type) should be in one header and things
+	that affect only one or two targets should be in another; when
+	you change this you delete the _o files (or equivalent) of the
+	targets that need remaking to force MAKE to rebuild.
+
+-	If you have a crash then the clock may well need resetting: even
+	with the Gold Card PROT_DATE command, this is sometimes
+	necessary the protection for the clock provided by it is
+	relatively easy to subvert. The clock in Minerva Mk 2 is very
+	difficult indeed to trash by accident.
+
+-	In the Makefile for MAKE, the targets 'install' and 'tidy' can
+	interact in an unhelpful way. If you write
+
+		make tidy install
+
+	then the files that install copies get deleted before anything
+	useful can be done with them. You should therefore write
+
+		make install tidy
+
+	which gets the right result. Once again, I emphasize the value
+	of the -n option.
+
+-	If MAKE isn't doing what you expect, use a command like
+
+		make -np >ram1_make_list
+
+	and examine the various bits of that output file to see if all
+	your assumptions are correct. The -p flag is used to list all
+	the macro and target definitions.
+
+
+7 Problems
+
+7.1 Error Messages
+
+A number of error messages can be output by MAKE. Some are associated
+with a specific point in the Makefile, in which case you will usually be
+told where that point is. Some errors cause immediate termination of
+MAKE, while others delay termination so that other any errors may be
+reported.
+
+illegal macro character
+	Macro names should only contain letters, digits, underscores and
+	dots.
+
+undefined macro
+	Couldn't find a definition for a macro. The search order is the
+	macro symbol table within MAKE --- i.e., the definitions you
+	make with lines like
+
+		a = b
+
+	followed by the environment --- i.e., the getenv() function.
+
+Can't open '<filename>'
+Error reading '<filename>'
+Error closing '<filename>'
+	Moslty self explanatory. Further information not available ---
+	perhaps the file doesn't exist, or the disk is missing, or a
+	channel to the file has been opened by some other job. An error
+	closing a file is really an error that occured while it was open
+	but was only noticed later on.
+
+No targets
+	No targets were specified anywhere, so MAKE couldn't do anything
+	useful.
+
+Circular dependency at <target>
+	Circular dependency lists are not allowed; they are picked up
+	sometimes but are quite likely to cause a crash.
+
+extension truncated
+	Extensions are restricted to 15 characters, which should be more
+	than enough for anyone.
+
+template syntax error
+	You wrote something like
+
+		_c_h_i : ...
+	
+	with more than two extensions; this is not permitted.
+
+colon expected
+	You forgot to write a colon, or wrote something which MAKE
+	interprets as needing a colon when you really meant something
+	else.
+
+newline expected
+	You wrote something after the interesting part of a line, for
+	example filenames after the colon in a template.
+
+name(s) expected
+	Shouldn't occur? You didn't write any filenames but MAKE thought
+	you should have done.
+
+multiple macro names not allowed
+	You can't write something like
+	
+		a b = ...
+
+multiple primaries not allowed
+	You wrote something like
+
+		a b - c
+
+no secondaries found
+	You wrote a line like
+		a -
+
+'<target>' already has a primary
+	You wrote something like
+
+		a - c
+		b - c
+
+syntax error
+	You wrote something in the Makefile that made no sense at all.
+
+error in analysis phase
+	The analysis phase went wrong somewhere. MAKE can't proceed past
+	this message.
+
+empty command
+	You managed to write a command without a command in it. As far
+	as I can see, you need a bit of lateral thinking to actually do
+	something silly enough to produce this message. A look at the
+	source should provide a large clue, though.
+
+Error return from command: <message>
+	An external program failed. Note that some programs return
+	status codes in situations other than errors; use the '-' flag.
+	
+	If the return code can't be interpreted as something more
+	interesting, all you will get is a number.
+
+Terminating due to command error
+	If an external program fails, MAKE will normally stop right
+	there unless you use the '-' flag at the start of the command or
+	use the -i switch on the command line.
+
+'<target>' is up to date
+	Output by the top level of MAKE if a target you've explicitly
+	told it to re-make doesn't need re-making. Remember that
+	specifying no targets at all on the command line is equivalent
+	to specifying the first target defined.
+
+'<target>' is too long for template matching
+	Targets with names longer than 256 characters are not supported
+	by MAKE and this is where they usually fall over. Where exactly
+	did you find the time to type in a 256 character filename?
+
+Can't read update date for '<filename>'
+	The file was opened, but when MAKE went to read its update date
+	it couldn't for some reason.
+
+Meaningless update date for '<filename>'
+	The update date read for a file has no real meaning, i.e., it's
+	0. Only the case on out-of-date io drivers --- I suggest you
+	upgrade.
+
+7.2 Bugs
+
+You may find that MAKE terminates with a message like
+
+	assertion failed ...
+
+If this happens, let me know:
+
+	the full failure message
+	the contents of the Makefile
+	the update dates of all related files
+
+In other words, give me enough information to replicate the problem.
+Details of hardware and installed software would also be helpful.
+Ideally, you should find the smallest possible Makefile and target files
+that cause the problem.
+
+If MAKE does something else wrong, but doesn't fail an assertion, then
+the same procedure applies, it's just more difficult to work out where
+the bug is.
+
+See section C.1 for how to get in touch.
+
+
+Appendix A: History
+
+A.1 The Source Code
+
+Current versions of MAKE are heavily skewed towards the Ql but a
+conversion to other platforms shouldn't be difficult.
+
+The source code is acceptable to C68; I compiled it using version
+3.something, though the compile phase was a slightly modified version
+4.0. I generally aim to produce as few warnings as possible with the
+-warn=5 switch, though I don't mind warnings about 'assignment in
+conditional context'.
+
+The main difference from C68 as distributed is that I use the symbols
+__QDOS__, __C68__ and __MC68000__ instead of QDOS, C68 and MC68000 so
+that ANSI's name space requirements are closer to being satisfied
+(though C68 and its libraries violates the standard left, right and
+centre.) MAKE as supplied defines these macros on the CC command line.
+
+The source files are:
+
+	analyse_c		Parse makefile
+	english_c		English message texts
+	copying_txt		The conditions under which MAKE may be
+				used and distributed.
+	globals_c		Global variables
+	history_txt		Revision history
+	io_c			Input and output
+	macros_c		Macro support
+	main_c			Executive
+	Makefile		Makefile to install MAKE
+	make_c			Decide what to recompile and do it
+	make_h			Miscellaneous declarations
+	make_txt		The manual for MAKE
+	memory_c		Memory functions
+	system_c		system() function for C68
+	targets_c		Target handling
+	templates_c		Template handling
+	types_h			Type declarations
+
+A.2 Developments
+
+The revision history has now been moved to a separate file.
+
+A.3 Bugs and Such
+
+-	If you use $$ in a macro definition then the macro itself
+	contains just a single $ which means that, depending on the
+	immediately following characters, strange things may happen.
+
+	(Cured?)
+
+-	If you define a rule using multiple targets and some commands
+	then the command may get executed many times. If it contains the
+	$@ or $* macros then that may be OK but otherwise it could be a
+	little tedious... This is entirely consistent with the
+	description of the feature in section 5.3 but it is irritating.
+
+	Changing this to the obvious alternative would be quite a lot of
+	work, as it happens; it might well also be counterproductive,
+	since both types of behaviour are quite useful in different
+	situations which could conceivably occur in the same makefile.
+
+	I'll probably leave it as it is.
+
+-	The primary/secondary target system is frankly rather shaky. I
+	can't recommend using it unless there is no alternative. It is
+	genuinely different from using multiple targets.
+
+-	The only language supported in English. If anyone does a
+	translation to some other language and lets me have a copy then
+	I'll include it in future releases. Use english_c as a guide;
+	the filename for your new file should be the local name for the
+	language it uses, with _c on the end.
+
+-	It would be nice to be able to write rules such as
+
+		*_c : *_h
+
+	but you can't (yet.)
+
+-	Circular dependency lists can cause a stack overflow, which will
+	usually lead to a crash.
+
+
+Appendix B: The Make Algorithm
+
+B.1 Design Goals
+
+For version 2.1 of MAKE, I took the trouble to design an improved
+algorithm to decide which targets to remake. The following points were
+all taken into account:
+
+-	Absent targets (i.e. targets which do not have a corresponding
+	file, either because it hasn't been re-made or because it never
+	exists.)
+	These targets should only be re-made if the targets they depend
+	on are more recent than the target that depends on the
+	non-existent target. This logic must also work on chains of
+	absent targets of arbitrary length.
+
+-	Templates
+	Targets with no command list, although maybe with dependent
+	targets (e.g., included files.)
+	The most important point here is to get the right template.
+
+The resulting algorithm is superior to the rather fuzzily defined rules
+used in previous versions. Suppose you were to completely compile a
+program and then delete all the _o files. The old algorithm would, if
+you called MAKE again, recompile everything from scratch, even though
+the program was up to date. The new one will recognise that it cannot
+improve matters and will do nothing.
+
+B.2 Outline
+
+B.2.1 Setup
+
+The obvious first step is to decide whether a target has a corresponding
+existing file, and if so what its update date is. This is best done when
+each target is created, since there is no point at which more targets
+may be created and no file update dates are ever required.
+
+B.2.2 Templates
+
+When all targets in the Makefile have been read, the second step is to
+apply templates. This may result in the creation of further targets, to
+which templates may be applied.
+
+When searching for a template to use for some target, the search is
+carried out twice. The first time, the set of all targets is searched.
+This catches two distinct cases. The first is when a target fits a
+template with one of its dependent files:
+
+	fred_o : fred_c fred_h
+		/* no command --- let Make guess */
+
+Alternatively, there may be constructs like so:
+
+	scan_o :
+		/* nothing --- maybe an implicit rule */
+	
+	scan_c : scan_l
+		flex -t scan_l >scan_c
+
+In practice, the "scan_c : scan_l" rule would probably be generated by a
+template itself, possibly after the first check on scan_o. There is room
+for improvment in this area. Hence it is necessary to check all targets
+for possible template application repeatedly until no changes occur.
+
+The third search looks for existing files which have names fitting some
+template. This will probably be a major source of template matching; for
+example:
+
+	OBJECT = 1_o 2_o 3_o
+	
+	prog : $(OBJECT)
+		/* some link command */
+
+...is a common idiom.
+
+After template application, no more targets will be added to the list of
+targets.
+
+B.2.3 Re-make decision
+
+This is the critical part of the program. 
+
+To decide whether to remake a target, previous versions looked at
+dependent files. If any of those were to be remade, then the target
+under consideration must also be remade.
+
+Further, a target whose corresponding file did not exist was to be
+remade, and a target which was less recent than any of its (existing)
+dependent files was ti be remade.
+
+The new algorithm calculates the date of the most recent existing
+dependent target, taking dependence to be a transitive relation: so if
+T1 depends on T2 and T2 depends on T3 then T1 depends on T3.
+
+If the target under consideration is more recent than all its dependent
+targets then there is no need to remake it. For this purpose, we regard
+a target whose corresponding file does not exist as having an update
+date of 0: so everything is at least as recent as it.
+
+If the target under consideration is no more recent than at least one of
+its dependent targets (i.e., there is a dependent target at least as
+recent as it) then it must be remade. It is therefore necessary to
+decide whether any of its directly dependent files must be remade.
+
+(Direct dependence is the non-transitive, though not necessarily anti-
+transitive, relation corresponding to dependence.)
+
+B.3 Detail
+
+B.3.1 Definitions
+
+I use the following definitions to render the description of the
+algorithm in 
+
+	S is the set of all known targets.
+
+	F(T) is the file corresponding to target some T.
+
+	U(F) is the update date of some file F, or 0 if file F does not
+	exist.
+
+	F(X) is the set {F(T) : T in X} for some set X of targets.
+
+	U(X) is the set {U(F) : F in X} for some set X of files.
+
+	Max(X) is the most recent member of the set X of times.
+
+	T1 DD T2 if and only if T2 is a direct dependent target of T1;
+	it corresponds to the existence of either an explicit rule of
+	the form
+
+		T1 : T2
+
+	or an implicit rule of the same form generated by application of
+	a template.
+
+	DD is a relation from S to S; it is anti-reflexive,
+	anti-symmetric and not transitive.
+
+	T1 D T2 if and only if T2 is a dependent target of T1; relation
+	D is the "transitive closure" of DD. The definition of D is such
+	that T1 D T2 if and only if
+		
+		T1 DD T2
+
+	or there exists some target T3 in S such that
+		
+		T1 D T3 and T3 D T2.
+
+	D is a relation; it is anti-reflexive and (by construction)
+	transitive. It is therefore anti-symmetric, for suppose there
+	exist T1, T2 such that T1 D T2 and T2 D T1 (i.e. D is not
+	anti-symmetric.) Then by transitivity, T1 D T2 and T2 D T1, both
+	of which are false due to anti-reflexivity; hence such T1, T2 do
+	not exist.
+
+	SD(T) is the set {T1 in S : T D T1} for some target T.
+
+	SDD(T) is the set {T1 in S : T DD T1} for some target T. SDD(T)
+	is a subset of SD(T).
+
+	R(T) is true if target T is to be re-made, false if T is
+	definitely not to be re-made and indeterminate otherwise.
+
+	G is the set of targets T (in S, of course) which were mentioned
+	on the command line; if that definition would make G the empty
+	set then G contains just the first target defined.
+
+B.3.2 Decision
+
+Before any decisions have been taken, R(T) is false for all S in T. The
+top level of the program does
+
+	Decide( T )
+
+for each T in the set of targets specified on the command line, or for
+just the target T which was the first target specified in the makefile
+if there were no targets on the command line.
+
+The Decide procedure for some target T is as follows:
+	
+	Decide( T ):
+	  Let Date be Max( U( F( SD( T ) ) )
+	  If Date >= U( F( T ) )
+	    R(T) is true
+	    For all T1 in SDD( T )
+	      Decide( T1 )
+	    End for
+	  Else
+	    R(T) is false
+	  End if
+	End Decide
+
+The advantage of the notation used becomes clear in the apparent
+simplicity of this. By the transitivity and anti-symmetry of D, no
+infinite loops occur.
+
+B.3.3 Re-make
+
+It is still necessary to determine the order in which to carry out the
+re-make; the following algorithm will do this:
+	
+	Let S1 be the set {T in S : R(T) is true and T has commands}
+	While S1 is non-empty do
+	  If there is T in S1 such that SD(T) is disjoint from S1 then
+	    Execute the commands for T
+	    Remove T from S1
+	  Else
+	    D is not anti-symmetric --- contradiction
+	  End if
+	End while
+
+However, there is a much easier way; for each target that the program
+has been asked to re-make, it is sufficient to do
+
+	Remake( T )
+
+where
+
+	Remake( T ):
+	  If R( T ) is true then
+	    For all T1 in SDD(T)
+	      Remake( T1 )
+	    End for
+	    Execute commands for T
+	  End if
+	End Remake
+
+which is what is in fact done.
+
+
+Appendix C: Copyright Notice
+
+C.1 The Author
+
+The author of this software is:
+
+	Richard Kettlewell
+        rjk@greenend.org.uk
+
+Donations, ideas for improvements and bug reports are welcome.
+
+C.2 Notice
+
+Copyright (C) 1993 Richard Kettlewell
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 2 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+675 Mass Ave, Cambridge, MA 02139, USA.

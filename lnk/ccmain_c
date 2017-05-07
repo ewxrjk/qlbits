@@ -1,0 +1,132 @@
+/*
+ * CC/XCC main loop
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+	*opt_pp = NULL;
+
+	for(ip = ilist; ip; ip = ip->next) if(ip->type == I_MODULE) {
+		int csource;
+		char *newname;
+#ifdef DEBUG
+		fprintf(stderr, "cc %s\n", ip->name);
+#endif
+		if(cpping && ((csource = xmatch(ip->name, "c")) || xmatch(ip->name, "x"))) {
+			comnam = cpp_prog;
+			if(!csource)
+				strcpy(combuf, "-P ");
+			else
+				*combuf = 0;
+			for(opt_p = opt_list; opt_p; opt_p = opt_p->next)
+				if(opt_p->type == 0) {
+					strcat(combuf, opt_p->path);
+					strcat(combuf, " ");
+				}
+			newname = createname((csource ? c68ing : as68ing) ? tmppath : NULL, ip->oname, csource ? "i" : "s");
+			strcat(combuf, ip->name);
+			strcat(combuf, " ");
+			strcat(combuf, newname);
+			switch(execute(0)) {
+				case -1:
+					return 1;
+				case 1:
+					returncode = 1;
+					break;
+				case 0:
+					ip->name = newname;
+					ip->temped = 1;
+					break;
+			}
+		}
+		/* If you want unproto put it in here. But it is not worth it. */
+		if(c68ing && xmatch(ip->name, "i")) {
+			comnam = c_prog;
+			*combuf = 0;
+			for(opt_p = opt_list; opt_p; opt_p = opt_p->next)
+				if(opt_p->type == 'Q') {
+					strcat(combuf, "-");
+					strcat(combuf, opt_p->path);
+					strcat(combuf, " ");
+				} else if(opt_p->type == 1) {
+					strcat(combuf, opt_p->path);
+					strcat(combuf, " ");
+				}
+			newname = createname(as68ing ? tmppath : NULL, ip->oname, "s");
+			strcat(combuf, ip->name);
+			strcat(combuf, " ");
+			strcat(combuf, newname);
+			switch(execute(0)) {
+				case -1:
+					return 1;
+				case 1:
+					if(ip->temped)
+						unlink(ip->name);
+					returncode = 1;
+					break;
+				case 0:
+					if(ip->temped)
+						unlink(ip->name);
+					else
+						ip->temped = 1;
+					ip->name = newname;
+					break;
+			}
+		}
+		if(macing && xmatch(ip->name, "asm")) {
+			comnam = mac_prog;
+			newname = createname(NULL, ip->oname, "rel");
+			strcpy(combuf, ip->name);
+			strcat(combuf, " con_ ");
+			strcat(combuf, newname);
+			strcat(combuf, " -errors");
+			switch(execute(0)) {
+				case -1:
+					return 1;
+				case 1:
+					if(ip->temped)
+						unlink(ip->name);
+					returncode = 1;
+					break;
+				case 0:
+					if(ip->temped)
+						unlink(ip->name);
+					else
+						ip->temped = 1;
+					ip->name = newname;
+					break;
+			}
+		}
+		if(as68ing && xmatch(ip->name, "s")) {
+			comnam = as_prog;
+			*combuf = 0;
+			newname = createname(NULL, ip->oname, "o");
+			strcat(combuf, ip->name);
+			strcat(combuf, " ");
+			strcat(combuf, newname);
+			switch(execute(0)) {
+				case -1:
+					return 1;
+				case 1:
+					if(ip->temped)
+						unlink(ip->name);
+					returncode = 1;
+					break;
+				case 0:
+					if(ip->temped)
+						unlink(ip->name);
+					else
+						ip->temped = 1;
+					ip->name = newname;
+					break;
+			}
+		}
+	}
+	if(!linking)
+		return returncode;
+#ifdef XCC
+	printf("LNK %s (c) 1993 Richard Kettlewell\n", _version);
+#endif
+
+#ifdef CC
+# include "cclnk.c"
+#endif

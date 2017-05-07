@@ -1,0 +1,73 @@
+********************************************************************************
+* Demo RTM                                           (c) 1993 Richard Kettlewell
+*
+* We start with some routines which are ultimately called from usedemo_asm
+*
+         xdef     .RTMDEF
+*
+         section  RTMNAME
+*
+* 11/8/1993 Name added (see insrtm_asm)
+*
+         dc.w     $4afb
+         dc.w     namend-*-2
+         dc.b     'LIBdemo demonstration RTM (c) 1993 Richard Kettlewell',10
+namend
+*
+         section  TEXT
+*
+opencon  moveq    #1,d0
+         moveq    #-1,d1
+         moveq    #0,d3
+         lea      con,a0
+         trap     #2
+         tst.l    d0
+         rts
+*
+con      dc.w     3,'CON'
+*
+write    move.w   (a1)+,d2
+         moveq    #7,d0
+         moveq    #-1,d3
+         trap     #3
+         tst.l    d0
+         rts
+*
+waitkey  moveq    #14,d0
+         moveq    #-1,d3
+         trap     #3
+         moveq    #1,d0
+         trap     #3
+         tst.l    d0
+         rts
+*
+         section  DATA
+*
+.RTMDEF  dc.l     0
+         dc.l     0
+         dc.b     3,'ASM'                    ; First entry is name space
+*
+* This is the table used by the RTM manager; it must be sorted from here on
+*
+         dc.l     0
+         dc.l     opencon
+         dc.b     7,'OPENCON'
+         dc.l     0
+         dc.l     waitkey
+         dc.b     7,'WAITKEY'
+         dc.l     0
+         dc.l     write
+         dc.b     5,'WRITE'
+         dc.l     0
+         dc.l     0
+*
+         section  RTM
+*
+* This is the table used by LNK to scan the RTM; it need not be sorted.
+*
+         dc.b     7,'OPENCON'
+         dc.b     7,'WAITKEY'
+         dc.b     5,'WRITE'
+         dc.b     0
+*
+         end

@@ -1,0 +1,409 @@
+------------------------------------------------------------------------
+
+                                   CC
+
+          C compiler front end for the C68 compilation system
+
+------------------------------------------------------------------------
+
+SYNOPSIS
+
+	CC [options] filelist
+
+DESCRIPTION
+
+The CC command is the users command-line front-end to the C68
+compilation system. It provides a convenient method of controlling and
+running all the underlying components.
+
+In the description of the options, the program names in square brackets
+show which of the underlying compilation phases use any particular
+option. If you wish for more detail on how any option is used, then
+refer to the documentation specific to that phase.
+
+The CC front end uses the extension part of the filename to decide which
+phases are appropriate to any particular filename. It is important
+therefore that you stick to the filename conventions laid out later in
+this document.
+
+The compile options are preceeded with a '-' to differentiate them from
+any source file name. Note that case is significant when specifying
+options unless indicated otherwise. A number of options can
+alternatively be taken from Environment Variables as detailed later.
+
+-v	[CC, CPP]
+	Verbose flag. Display the command line to run each phase of the
+	compilation system as it is invoked. Useful if you are getting a
+	compilation failure and you are not sure at what stage of the
+	process.
+
+-g	[CC]
+	Specifies where to find the compiler phases; for example,
+	-gflp1_ or -gflp1_utils_. You would normally have these programs
+	in the program directory, or somewhere pointed to by C68PATH.
+
+-p	[CC]
+	Stop after the CPP pre-processor phase. This will produce a file
+	(ending in _i) which has the C source after pre-processing that
+	would normally be input to the next phase (C68).
+
+-s	[CC]
+	Stop after the C68 compilation phase. This will produce a file
+	(ending in _s) which has the assembler source produced by the
+	compiler.  Normally this is input into the assembler phase to
+	produce the object (_o) file.
+
+-c	[CC]
+	Stop after producing the _o file. This is the option used when
+	you are compiling individual modules that will later be linked
+	together.
+
+-D	[CPP]
+	This option (which can be used multiple times) is used to define
+	preprocessor symbols in the following ways:
+
+		-DSYMBOL
+
+	Causes SYMBOL to be defined as if you had included the directive
+
+		#define SYMBOL
+
+	in your source file.
+
+		-DSYMBOL=value
+
+	Causes SYMBOL to be defined as if you had included the statement
+
+		#define SYMBOL value
+
+	in your source file.
+
+-I	[CPP]
+	This option specifies a directory that the should be searched
+	when attempting to find an include file that is specified in the
+	source file. Therefore
+
+		-Iflp1_headers_
+
+	would mean that if your source file contained the line #include
+	<test.h> in your source file, the compiler will first look in
+	look in the directory flp1_headers_. If the file is not found
+	here then the directory <default_program_directory>_include_
+	will be searched.
+
+	If the include filename is inside double quotes, in the form
+
+		#include "test.h"
+
+	then the default program directory will be searched after
+	searching any directories specifed by -I options, but before
+	searching the default program directory.
+
+	Up to nine -I options may be used on the command line.
+
+	Another related feature is that any fullstops, slashes and
+	backslashes will be changed to underscores. So the file stdio.h
+	would be looked for under the name stdio_h and the file
+	sys/types.h would be looked for as sys_types_h. This allows
+	filename for include files to be left in the format expected by
+	Unix or MSDOS systems.
+
+	This means that it is not necessary to include the pathnames of
+	include files in your source programs. Standard header files on
+	the distribution disk are normally included by the line
+
+		#include <stdio.h>
+
+	if they are kept in the include_ directory in the default
+	program directory.
+
+-Q	[C68]
+	This option is used to pass additional options to the C68 phase.
+	It is followed immediately by the option you are interested in.
+	For further details see the C68 documentation.
+
+-o	[LNK,CC]
+	This option should be used when you want to automatically link
+	the program if all the modules specified are compiled
+	successfully. It is followed immediately by the name of the
+	output file in which it is to be put as in
+
+		-otest
+
+	or
+
+		-oflp1_test
+
+-L	[LNK]
+	Normally libraries are searched for in LIB_ sub-directory of the
+	default program directory. This option allows alterantive
+	lcoations to be searched in preference. You can specify this
+	option up multiple times.
+
+-m	[LNK]
+-ms
+	Produce a map file. The -ms will also have symbol information
+	included. The name of the map file will be the same as the
+	output file from the linker, but with _map appended to the name.
+
+-bufl
+-bufp	These options are obsolete.
+
+-l	[LNK]
+	Search the specified library(s) when linking the program before
+	the standard default libc_a library. See the LNK documentation
+	for more details.
+
+-r	[LNK]
+	Search a RTM definition. See the LNK documentation.
+
+Some options are passed through to the called programs; they are:
+
+[CPP]	-P
+	-C
+	-I...
+	-D...
+	-U...
+
+[C68]	-Q...
+	-warn=...
+	-warn
+	-list
+	-reg
+	-noreg
+	-opt
+	-noopt
+	-short
+	-noshort
+	-peep
+	-nopeep
+	-label
+	-nolabel
+	-icode
+
+No options are passed to as68, and the linker is built in so the
+question does not arise. The LNK documentation lists a number of options
+in addition to those above; they cannot at present be used through CC,
+though there exist environment variables which you can set to obtain a
+similar effect (see lnk_txt.)
+
+------------------------------------------------------------------------
+
+                         Environment Variables
+
+------------------------------------------------------------------------
+
+It can be more convenient to set certain options for CC via environment
+variables rather than via the CC command line. The following environment
+variables are currently supported:
+
+TMP	Specifies the device and/or directory that will be used to hold
+	intermediate files.
+
+TEMP	Not supported any more (though this doesn't mean it won't work!
+	Just don't rely on it, it's going to disappear.)
+
+C68PATH	The location that is used to hold the C68 compilation system.
+	Consists of a list of directory names separated by colons or
+	semicolons (or both), for example:
+
+		flp1_;flp2_;flp1_utils_
+		win1_:win1_utils_:flp1_
+
+	Each directory name *must* end in an underscore.
+
+PATH	If C68PATH is undefined then CC tries to use PATH instead; the
+	syntax is the same. If this is undefined then only the program
+	directory is searched.
+
+	Ideally, you should always have PATH set --- CC is not the only
+	program that looks at it --- or use some utility like the PTH
+	device driver which has much the same effect for all programs.
+	(DEV is similar, but different in several ways.)
+
+CC_LD	The name of the linker to call if the linker is not built into
+	CC. If this is undefined, 'LNK' is assumed.
+
+A number of other variables also have an effect; all begin 'CC_'. The
+kind of person who finds them useful will probably be the kind of person
+who is not afraid to look at the source code in question.
+
+If an option is also specified via the command line, then this overrides
+the setting of the Environment Variable.
+
+Other relevant environment variables are described in the LNK
+documentation.
+
+------------------------------------------------------------------------
+
+                              Exit Values
+
+------------------------------------------------------------------------
+
+The CC program returns the following error codes:
+
+0	All compilations were successful. That is, at least one source
+	file was compiled, and there were no fatal errors.
+
+1	One or more fatal compilation errors were reported.
+
+2	No source files were found.
+
+< 0	QDOS error code. A problem was encountered in running the
+	compiler driver (eg. No memory).
+
+------------------------------------------------------------------------
+
+                        The Compilation Process
+
+------------------------------------------------------------------------
+
+The actual compilation process takes place in several phases. Each phase
+is performed by a separate program. All these programs are controlled by
+CC so that the user does not have to run them individually.  However,
+awareness of the process helps understand many of the error conditions
+that can arise. In particular the filename extensions are used by CC to
+decide what actions are required for a particular file.
+
+C source files on the QL are expected to have the extension _c. These
+files are passed to the CPP pre-processor to produce an _i file. The
+pre-processor phase actions all lines that begin with '#' symbol.
+
+The next stage is C68 which is the main C compilation phase in which the
+C code is analysed and validated. The input to C68 is an _i file from
+the pre-processor stages. C68 generates assembler output which is put
+into a file with an _s extension. You may wish to look at this
+file to see what code has been generated by your C program. C68 can
+generate assembler code in two formats. The _s extension is used if it
+is in the format used by the AS68 assembler provided with the C68
+system.
+
+The assembler file is now compiled down into SROFF (Sinclair
+Relocatable Object File Format) and put into a file with an _o extension.
+
+If you are using CC with a built-in linker then that is used to link the
+_o files that now exist; otherwise, a linker is executed in the same way
+as other programs.
+
+The SROFF file(s) are input to the linker which converts them into
+executable machine code and adds support routines from the libraries
+supplied with C68 and any additional libraries specified. The output
+from the linker is a program that can be run with the EXEC command (or
+an equivalent) from SuperBasic.
+
+If this process seems complicated do not worry. The CC program takes
+control of this process so that it is easy to use.
+
+------------------------------------------------------------------------
+
+                         Compiling a C Program
+
+------------------------------------------------------------------------
+
+We now look at some practical of CC to compile C programs. Note that the
+C68 compilation system will expects to be able to use use Toolkit 2
+directories. This means that TOOLKIT 2 is highly recommended for running
+the C68 system. Programs generated by the C68 system will use Toolkit 2
+directories if present, but will also work satisfactorily without it.
+However, certain library calls require TOOLKIT 2, so for programs to
+work on all QL's these should be avoided. The library documentation will
+state when routines use TOOLKIT 2.
+
+To compile your program (for example test_c) simply type (from
+SuperBasic)
+
+	EX cc;'test_c'
+
+The above command loads the compiler phases from the default program
+device, and compiles the source file test_c found on the default data
+device, writing out a file test_p from CPP, replacing it with a file
+test_s after running C68, and test_o file after running AS68. Finally
+the linker will produce an output file called a_out.
+
+Any errors or warnings are reported in an on-screen window. You can also
+get CC to display the command lines for each phase as it is run by
+including the -v option, and put the final program into a specified file
+by using the -o option. To do this the above command line becomes
+
+	EX cc;'-v -otest test_c'
+
+The output from the compiler passes may be redirected into a file by use
+of the UNIX style >, and &> commands. For example, to redirect standard
+out (the compiler sign on messages) to a file ram1_wombat, you would
+type
+
+	>ram1_wombat
+
+anywhere in the command line. To redirect stderr as well (the channel
+used for any fatal QDOS error messages from CC) you would use
+
+	>&ram1_wombat
+
+Finally to append either of the above commands to an existing file
+without destroying it's contents you would use
+
+	>>ram1_wombat	in the first instance, and
+	>>&ram1_wombat	in the second.
+
+Redirection is covered more fully in the INTRO_DOC document.
+
+Wildcards may be used to select the files to be compiled. These follow
+the Unix rules for wild-cards - see the INTRO_DOC document for more
+details. For example, to compile all files in the current data directory
+ending in _c you would use:
+
+	EX CC;'<compiler options> *_c'
+
+The asterisk tells the CC program that the given name is a wildcard. It
+will then match any filename element that is before _c. To compile files
+starting in arc and ending in _c you would use :
+
+	EX CC;'<compiler options> ARC*_C'
+
+Wherever an asterisk appears CC will try and match a filename element to
+the name. However, if a name begins or ends with any characters other
+than an asterisk, then these characters must be matched exactly.
+Asterisks can also be used within filenames,
+
+	eg.	tes*_wom*_c
+
+matches test_wombat_c, tester_woman_user_c, but would NOT match the
+filename test_wom_c_hello. This wildcard matching is the same as that
+used in the directory access functions described in the library, and so
+is also available to your own programs.
+
+There is no practical limit on the number of names that may appear on
+the command line, whether they are derived from wildcard expansion or
+not.
+
+------------------------------------------------------------------------
+
+                               New CC/XCC
+
+------------------------------------------------------------------------
+
+The version of CC documented here is designed to have the link phase
+built in, though it can work separately from it. The LNK linker is
+capable of being compiled either as a standalone program or as XCC
+(usually renamed to CC).
+
+The following rules are used to compile programs:
+
+	Original	Compiler	Resulting
+	extension	phase		extension
+	
+	_c		cpp		_i
+	_i		c68		_s
+	_x		cpp -P		_s
+	_s		as68		_o
+	_asm		mac		_rel
+	_o		<linker>	<output>
+	_rel		<linker>	<output>
+
+For further information, see lnk_txt.
+
+*** This document is based on the original CC documentation, but updated
+for the new CC. The rest of the LNK/CC package is (c) 1993 Richard
+Kettlewell.
+
+------------------------------------------------------------------------

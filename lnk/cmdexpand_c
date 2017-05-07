@@ -1,0 +1,82 @@
+/*
+ *			c m d e x p a n d
+ *
+ *	Expand wild cards that occur in the command line.
+ *
+ *	This routine is called for each argument
+ *	It is expected to process them in turn,
+ *	and if necessary perform wild card expansion.
+ *
+ *	The parameter separator character is also passed
+ *	as a parameter.   This is examined to see if the
+ *	current parameter was a string (i.e. had ' or "
+ *	as the separator).	If so it is not expanded.
+ *
+ * 4/9/1992 RJK
+ *		Added code to copy filename strings to heap after scanning
+ *		(before, they were on stack: BAD ERROR!)
+ * 28/6/1993 RJK
+ *		Store filename list in heap rather than on stack: now use 4k buffer
+ *		to do this instead of 1k: therefore have 4 times as many filenames
+ *		(or same number, each 4 times as long...)
+ * 22/7/1993 RJK
+ *      Support arbitrary number of filenames without allocating
+ *      vast tranches of memory
+ *      Return directories as well (for ls)
+ *
+ * THIS IS INTENDED FOR USE WITH THE 'sh' AND 'LNK' PACKAGES.
+ * YOU **MUST** USE THE MODIFIED VERSION OF readqdir_c WITH THIS FILE.
+ */
+
+#include <qdos.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern char **_argv;
+extern int _argc;
+
+static void addparam(char *);
+
+void cmdexpand (char *param, int separator)
+{
+	/*
+	 *	Check to see if we should do wild card expansion.
+	 *	We only perform wildcard expansion if the parameter
+	 *	was not a string and if it contains one of the
+	 *	wild card characters.
+	 */
+	if (separator != '"' && separator != '\'' && strpbrk(param,"*?")) {
+		long id;
+		char buffer[64];
+		char any = 0;
+
+		if((id = open_qdir(param)) > 0) {
+			/* I modified read_qdir() */
+			while(read_qdir(id, param, buffer, NULL, QDR_ALL) > 0) {
+				char *p;
+
+				if(!(p = malloc(strlen(buffer)+1)))
+					exit(-3);
+				addparam(strcpy(p, buffer));
+				any = 1;
+			}
+			io_close(id);
+		}
+		if(any)
+			return;
+	}
+
+	/*
+	 *	Default is to simply add argument to list unchanged
+	 *	We do this for arguments that do not contain a wildcard,
+	 *	or which did not match any files.
+	 */
+	addparam(param);
+}
+
+
+static void addparam(char *param)
+{
+	_argv = (char **)realloc ((void *)_argv, (size_t)((_argc + 2) * sizeof (char *)));
+	_argv[_argc++] = param;
+}

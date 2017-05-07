@@ -1,0 +1,19 @@
+typedef struct {
+	int letter;							/* Option letter */
+	char *word;							/* Option word */
+	char *text;							/* Result */
+	long *value;						/* Result */
+} Option;
+
+/* Special values of letter field: */
+#define OPT_O_END		0				/* End of fixed part */
+#define OPT_O_LIST		-1				/* End of fixed part, optional list follows */
+#define OPT_O_POS		-2				/* Positional parameter */
+										/* text field is assigned with address */
+#define OPT_O_STR		256				/* Mask for string argument */
+										/* text field is assigned with address */
+#define OPT_O_INT		512				/* Mask for integer argument */
+										/* text field is used as a "long *" */
+#define OPT_O_DEP		1024			/* Deprecated option */
+
+int opt_collect(Option [], int, char **);

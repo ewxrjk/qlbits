@@ -1,0 +1,146 @@
+/*
+ * Option collection routine
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <stdio.h>
+#include "opts.h"
+
+/*
+ * Return is -ve for error, else l such that list arguments are in
+ * found in argv[1], argv[2], ..., argv[l-1] (0 for no list allowed.)
+ * Arguments beyond this are undefined.
+ */
+int opt_collect(Option table[], int argc, char **argv)
+{
+	int argno;
+	int posargs;
+	int lpos;
+	int i, j;
+
+	lpos = 1;
+	/* find start of positional parameter list */
+	for(posargs = 0; table[posargs].letter > 0; posargs++)
+		;
+	j = posargs;
+	/* process all arguments */
+	for(argno = 1; argno < argc; argno++) {
+		if(argv[argno][0] == '-' && argv[argno][1] != 0) {
+			char *p;
+
+			/* a switch */
+			if(argv[argno][1] == '-' && argv[argno][2] != 0) {
+				/* long switch e.g. '--verbose' */
+				p = argv[argno]+2;
+				for(i = 0; i < posargs; i++) {
+					if(!strcmp(table[i].word, p))
+						break;
+				}
+				if(i >= posargs) {
+					fprintf(stderr, "Switch '--%s' unknown\n", p);
+					return -1;
+				}
+				if(table[i].letter & OPT_O_DEP)
+					fprintf(stderr, "Warning: switch '--%s' deprecated\n", p);
+				/* maybe there's an argument */
+				if(table[i].letter & (OPT_O_STR|OPT_O_INT)) {
+					/* zap this switch */
+					argv[argno++] = NULL;
+					if(argno >= argc) {
+						fprintf(stderr, "Argument to '--%s' missing\n", table[i].word);
+						return -1;
+					}
+					p = argv[argno];
+					if(table[i].letter & OPT_O_INT) {
+						char *q;
+
+						errno = 0;
+						if(table[i].text)
+							*table[i].text = 1;
+						*table[i].value = strtol(p, &q, 0);
+						if(*q || p == q || errno) {
+							fprintf(stderr, "Illegal argument to '--%s'\n", table[i].word);
+							return -1;
+						}
+					} else
+						table[i].text = p;
+				} else
+					*table[i].text = 1;
+			} else {
+				/* short switch e.g. '-v' */
+				p = argv[argno]+1;
+				while(*p) {
+					for(i = 0; i < posargs; i++) {
+						if((table[i].letter & 255) == *p)
+							break;
+					}
+					if(i >= posargs) {
+						fprintf(stderr, "Switch '-%c' unknown\n", *p & 255);
+						return -1;
+					}
+					if(table[i].letter & OPT_O_DEP)
+						fprintf(stderr, "Warning: switch '-%c' deprecated\n", *p & 255);
+					p++;
+					/* maybe there's an argument */
+					if(table[i].letter & (OPT_O_STR|OPT_O_INT)) {
+						int moved = 0;
+
+						/* see if argument is in-line */
+						if(!*p) {
+							argv[argno++] = NULL;
+							if(argno >= argc) {
+								fprintf(stderr, "Argument to '-%c' missing\n", table[i].letter);
+								return -1;
+							}
+							p = argv[argno];
+							moved = 1;
+						}
+						if(table[i].letter & OPT_O_INT) {
+							char *q;
+
+							errno = 0;
+							if(table[i].text)
+								*table[i].text = 1;
+							*table[i].value = strtol(p, &q, 0);
+							if(p == q || errno || (moved && *q)) {
+								fprintf(stderr, "Illegal argument to '--%s'\n", table[i].word);
+								return -1;
+							}
+							p = q;
+						} else {
+							table[i].text = p;
+							break;
+						}
+					} else
+						*table[i].text = 1;
+				}
+			}
+			argv[argno] = NULL;
+		} else {
+			switch(table[j].letter) {
+				case OPT_O_LIST:
+					argv[lpos++] = argv[argno];
+					break;
+				case OPT_O_POS:
+					table[j++].text = argv[argno];
+					argv[argno] = NULL;
+					break;
+				default:
+					fprintf(stderr, "Bad opt_collect() table\n");
+					return -1;
+			}
+		}
+	}
+	switch(table[j].letter) {
+		case OPT_O_LIST:
+			return lpos;
+		case OPT_O_END:
+			return 0;
+		default:
+			fputs("Arguments missing\n", stderr);
+			return -1;
+	}
+}

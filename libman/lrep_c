@@ -1,0 +1,208 @@
+/*
+ * Library replace/add modules
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <qdos.h>
+#include "lib.h"
+#include "opts.h"
+
+char _prog_name[] = "LREP";
+char _version[] = "1.0";
+char _copyright[] = "(c) 1993 RJK";
+int _stack = 16000;
+void cmdexpand();
+void (*_cmdwildcard)() = cmdexpand;
+void consetup_title();
+void (*_consetup)() = consetup_title;
+
+char aflag, eflag, fflag, hflag, nflag, mflag, uflag, vflag;
+
+Option opt_tab[] = {
+	{ 'a',			"append",		&aflag,		NULL },
+	{ 'e',			"retain",		&eflag,		NULL },
+	{ 'f',			"freshen",		&fflag,		NULL },
+	{ 'h',			"help",			&hflag,		NULL },
+	{ 'm',			"move",			&mflag,		NULL },
+	{ 'n',			"inherent",		&nflag,		NULL },
+	{ 'u',			"update",		&uflag,		NULL },
+	{ 'v',			"verbose",		&vflag,		NULL },
+	{ OPT_O_POS,	NULL,			NULL,		NULL },
+	{ OPT_O_LIST,	NULL,			NULL,		NULL }
+};
+
+#define LIBNAME		8
+
+void usage(void);
+
+int main(int argc, char **argv)
+{
+	int i;
+	int rval = 0;
+	FILE *output;
+	Module *mp, **mpp;
+
+	if((argc = opt_collect(opt_tab, argc, argv)) < 2 || hflag) {
+		usage();
+		return hflag ? 0 : 1;
+	}
+	opt_tab[LIBNAME].text;
+	if(loadlib(opt_tab[LIBNAME].text, 0) < 0) {
+		fprintf(stderr, "Can't load '%s'\n", opt_tab[LIBNAME].text);
+		return -7;
+	}
+	/* now update or add libraries */
+	for(i = 1; i < argc; i++) {
+		FILE *fp;
+		char buffer[256];
+		char name[33];
+		char *p, *banner;
+		int c;
+		Date date;
+		struct qdirect d;
+		
+		if(!(fp = fopen(argv[i], "rb"))) {
+			fprintf(stderr, "Can't open '%s'\n", argv[i]);
+			rval = -1;
+			continue;
+		}
+		/* dodgy code: */
+		if(fgetc(fp) != 0xFB || fgetc(fp) != 0x01) {
+			fprintf(stderr, "'%s' is not SROFF\n", argv[i]);
+			fclose(fp);
+			continue;
+		}
+		c = fgetc(fp);
+		fread(buffer, (size_t)1, (size_t)c, fp);
+		if(banner = strchr(buffer, ' ')) {
+			*banner++ = 0;
+			while(*banner == ' ')
+				banner++;
+			if(p = strrchr(banner, '|'))
+				*p = 0;
+		} else {
+			banner = buffer + strlen(buffer) + 1;
+			banner[0] = 0;
+		}
+		if(nflag)
+			strcpy(name, buffer);
+		else {
+			strcpy(name, argv[i]);
+			if(!eflag) {
+				if(p = strrchr(name, '_'))
+					*p = 0;
+			}
+		}
+		fs_headr(fgetchid(fp), -1, (char *)&d, (long)sizeof d);
+		if((date = d.d_update) < 300000000)
+			date = 0L;
+		if(date)
+			sprintf(banner + strlen(banner), "|%lx", date);
+		/* look for a module in the library with an appropriate name */
+		/* fixme: do a faster search --- hack in lload_c */
+		for(mp = modules; mp; mp = mp->next)
+			if(!stricmp(mp->name, name))
+				break;
+		if(mp) {
+			if(date >= mp->date || !(uflag || fflag)) {
+				mp->filename = argv[i];
+				mp->offset = ftell(fp);
+				strcpy(mp->name, name);
+				strcpy(mp->banner, banner);
+				if(vflag)
+					fprintf(stderr, "Replacing '%s' from '%s'\n", name, argv[i]);
+				/* leave it like this for later */
+			}
+		} else {
+			if(!fflag) {
+				mpp = &modules;
+				if(aflag) {
+					while(mp = *mpp)
+						mpp = &mp->next;
+				}
+				mp = malloc(sizeof *mp);
+				if(!mp) {
+					fprintf(stderr, "Insufficient memory to add '%s'\n", argv[i]);
+					rval = -1;
+				} else {
+					mp->next = *mpp;
+					*mpp = mp;
+					mp->filename = argv[i];
+					mp->offset = ftell(fp);
+					mp->text = NULL;
+					strcpy(mp->name, name);
+					strcpy(mp->banner, banner);
+					if(vflag)
+						fprintf(stderr, "Adding '%s' from '%s'\n", name, argv[i]);
+				}
+			}
+		}
+		fclose(fp);
+	}
+	if(!(output = fopen(opt_tab[LIBNAME].text, "wb"))) {
+		fprintf(stderr, "Can't re-write '%s'\n", opt_tab[LIBNAME].text);
+		return -1;
+	}
+	for(mp = modules; mp; mp = mp->next) {
+		if(mp->filename) {
+			FILE *fp;
+			int c;
+
+			if(!(fp = fopen(mp->filename, "rb"))) {
+				fprintf(stderr, "Can't read '%s' --- skipping\n", mp->filename);
+				if(mp->text)			/* try our best ! */
+					goto oldmod;
+			}
+			fseek(fp, mp->offset, SEEK_SET);
+			fputc(0xFB, output);
+			fputc(0x01, output);
+			if(mp->banner[0]) {
+				fputc((int)(strlen(mp->name) + strlen(mp->banner) + 1), output);
+				fputs(mp->name, output);
+				fputc(' ', output);
+				fputs(mp->banner, output);
+			} else {
+				fputc((int)strlen(mp->name), output);
+				fputs(mp->name, output);
+			}
+			while((c = getc(fp)) != EOF)
+				putc(c, output);
+			if(ferror(fp))
+				fprintf(stderr, "Error reading '%s' --- library broken\n", mp->filename);
+			fclose(fp);
+		} else {
+oldmod:		fwrite(mp->text, (size_t)1, (size_t)mp->length, output);
+		}
+		if(ferror(output))				/* Test regularly */
+			break;
+	}	
+	if(ferror(output)) {
+		fprintf(stderr, "Error writing '%s' --- library broken\n", opt_tab[LIBNAME].text);
+		rval = -7;
+	}
+	fclose(output);
+	if(mflag && !rval) {
+		for(i = 1;i < argc; i++)
+			remove(argv[i]);
+	}
+	return rval;
+}
+
+void usage(void)
+{
+	fprintf(stderr, "%s %s\n(c) 1993 Richard Kettlewell\n", _prog_name, _version);
+	fputs("---add/replace modules in SROFF library\n\n", stderr);
+	fputs("    LREP [-aefhmnuv] libraryfile objectfile ...\n\n", stderr);
+	fputs("    -a    --append    Append added modules (default=preprend)\n", stderr);
+	fputs("    -e    --retain    Retain extension\n", stderr);
+	fputs("    -f    --freshen   Freshen\n", stderr);
+	fputs("    -h    --help      This help\n", stderr);
+	fputs("    -m    --move      Move\n", stderr); 
+	fputs("    -n    --inherent  Use inherent module name\n", stderr);
+	fputs("    -u    --update    Update\n", stderr);
+	fputs("    -v    --verbose   Verbose\n", stderr);
+	fputs("\nUse LSORT to correct library ordering\n", stderr);
+}

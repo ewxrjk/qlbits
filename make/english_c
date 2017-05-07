@@ -1,0 +1,89 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* if translating to other languages it is important to keep the same order */
+char *messages[] = {
+	"line truncated",					/* cannot happen */
+	"illegal macro character",
+	"undefined macro",
+	"Macros\n======\n",
+	"Can't open '%s'\n",
+	"Error reading '%s'\n",
+	"Error closing '%s'\n",
+	"No targets\n",
+	"Circular dependency at %s\n",
+	"Templates\n=========\n",
+	"Targets\n=======\n",
+	"extension truncated",
+	"template syntax error",
+	"colon expected",
+	"newline expected",
+	"name(s) expected",
+	"multiple macro names not allowed",
+	"multiple primaries not allowed",
+	"no secondaries found",
+	"'%s' already has a primary",
+	"syntax error",
+	"Usage:-",
+	"  -e              Environment names override macro definitions",
+	"  -f<name>        Set makefile name [Makefile]",
+	"  -i              Ignore external command errors",
+	"  -n              Don't execute commands",
+	"  -p              Print database at end of run",
+	"  -s              Don't list commands",
+	"  -x<name>        Automake target",
+	"  -r              Don't set built in templates",
+	"  -h              Show this help",
+	"  -L              Show software license",
+	"  <name>=<text>   Define macro",
+	"  <target>        Define target to make",
+	"error in analysis phase",
+	"empty command",
+	"Error return from command: ",
+	"%d\n",
+	"Terminating due to command error\n",
+	"'%s' is up to date\n",
+	"'%s' is too long for template matching\n",
+	"Can't read update date for '%s'\n",
+	"Meaningless update date for '%s'\n",
+	"Out of memory\n",
+};
+
+#if __QDOS__
+char *ql_errors[] = {
+	"not complete\n",
+	"nonexistent job\n",
+	"insufficient memory\n",
+	"out of range\n",
+	"buffer full\n",
+	"channel not open\n",
+	"not found\n",
+	"already exists\n",
+	"in use\n",
+	"end of file\n",
+	"medium full\n",
+	"bad name\n",
+	"xmit error\n",
+	"format failed\n",
+	"bad parameter\n",
+	"file error\n",
+	"error in expression\n",
+	"overflow\n",
+	"not implemented\n",
+	"read only\n",
+	"bad line\n"
+};
+#endif

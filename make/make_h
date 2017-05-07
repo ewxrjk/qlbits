@@ -1,0 +1,152 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* declarations */
+#include <stdio.h>
+#include "debug.h"
+#include "types.h"
+
+#if __QDOS__
+int stricmp(char *, char *);
+#define FNCMP(fn1, fn2)		stricmp(fn1, fn2)
+#define NOT_FOUND			-7
+#define BAD_PARAMETER		-15
+#define NOT_IMPLEMENTED		-19
+#define EXTCHAR				'_'
+#endif
+
+/* default values for any old operating system */
+#ifndef FNCMP
+int strcmp(char *, char *);
+#define FNCMP(fn1, fn2)		strcmp(fn1, fn2)
+#includ <stdlib.h>
+#define NOT_FOUND			EXIT_FAILURE
+#define BAD_PARAMETER		EXIT_FAILURE
+#define NOT_IMPLEMENTED		EXIT_FAILURE
+#define EXTCHAR				'.'
+#endif
+
+/* These might get redefined on CC command line */
+#ifndef FASTFNCHAR
+#define FASTFNCHAR			1
+#endif
+#ifndef MAKEFILE
+#define MAKEFILE			"Makefile"
+#endif
+
+#define PROGNAME			"Make"
+#define VERSION				"2.1"
+
+/* macro l_putc evaluates C exactly once */
+#define l_putc(LP,C) ((LP)->length >= (LP)->size ? l_fputc((LP),(C)) : ((LP)->text[(LP)->length++] = (C)))
+int l_fputc(Line, int);
+
+char *find_macro(char *);				/* Find the definition of a macro */
+int expandmacros(char *, Line, struct dset *, struct target *, int);
+										/* Expand macros in a line for optional
+										 * target + dependent list */
+int inputline(Line);					/* Read one line */
+int main(int, char **);					/* Executive */
+long getdate(struct target *);			/* Find the update date of a target */
+struct template *define_template(char *,char *);
+										/* Define a template */
+struct target *define_target(char *);	/* Define a target */
+struct target *find_target(char *);		/* Find a target */
+void delete_target(struct target *);	/* Delete a target */
+int analyse(void);						/* Analyse a makefile */
+int apply_templates(struct target *, int);
+										/* Apply templates to the targets */
+int decide(struct target *);			/* Make decisions */
+void define_macro(char *, char *, int);	/* Define a macro */
+void dump_command(struct command *);	/* List commands */
+void dump_macros(void);					/* List macros */
+void dump_templates(void);				/* List templates */
+void dump_targets(void);				/* List targets */
+void execute(struct target *, struct dset *, struct command *);
+										/* Update a target */
+void makedepend(struct target *,struct target *);
+										/* Add to list */
+void newdepend(struct target *);		/* New dependent list */
+void remake(struct target *);			/* Act on decisions taken */
+void error(char *,char *,int, ...);		/* Report error */
+void *safe_malloc(size_t);
+char *safe_strdup(char *);
+int mdefined(char *);					/* True if a macro is defined */
+
+extern char _prog_name[];				/* Program name */
+extern int execflag;					/* Execute commands? */
+extern int verbose;						/* List commands? */
+extern int dumpflag;					/* List data structures? */
+extern int ignoreflag;					/* Ignore errors? */
+extern int envflag;						/* Environment vars overwrite defaults */
+extern struct template *templates;		/* List of templates */
+extern struct target *targets;			/* Tree of targets */
+extern FILE *input;						/* Input file pointer */
+extern Line rawinput, expanded;			/* Raw, expanded input buffers */
+
+#define	NEW(P) ((P) = safe_malloc(sizeof *(P)))
+
+enum {
+	MSG_LTRUNC,							/* Cannot happen */
+	MSG_ILLMCHAR,
+	MSG_UNDEFMACRO,
+	MSG_MACROTITLE,
+	MSG_CANTOPEN,
+	MSG_CANTREAD,
+	MSG_CANTCLOSE,
+	MSG_0TARGETS,
+	MSG_CIRCLE,
+	MSG_TEMPLATESTITLE,
+	MSG_TARGETSTITLE,
+	MSG_EXTENSIONTRUNC,
+	MSG_TEMPLATESYNTAX,
+	MSG_COLONEXPECTED,
+	MSG_NEWLINEEXPECTED,
+	MSG_NAMESEXPECTED,
+	MSG_MULTIPLEMACROS,
+	MSG_MULTIPLEPRIMARIES,
+	MSG_0SECONDARIES,
+	MSG_GOTPRIMARY,
+	MSG_SYNTAX,
+	MSG_USAGE,
+	MSG_OPTe,
+	MSG_OPTf,
+	MSG_OPTi,
+	MSG_OPTn,
+	MSG_OPTp,
+	MSG_OPTs,
+	MSG_OPTx,
+	MSG_OPTr,
+	MSG_OPTh,
+	MSG_OPTL,
+	MSG_OPTMAC,
+	MSG_OPTTARGET,
+	MSG_ANALYSIS,
+	MSG_EMPTYCOMMAND,
+	MSG_EPREFIX,
+	MSG_ERROR,
+	MSG_TERMINATE,
+	MSG_UPTODATE,
+	MSG_LONGNAME,
+	MSG_NOREADDATE,
+	MSG_NODATE,
+	MSG_MEM,
+};
+
+extern char *messages[];
+#if __QDOS__
+extern char *ql_errors[];
+#endif

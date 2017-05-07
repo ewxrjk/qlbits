@@ -1,0 +1,8 @@
+/*
+ * XCC wrapper
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+#define XCC
+#include "main.c"

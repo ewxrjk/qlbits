@@ -1,0 +1,270 @@
+/*
+ * Linker --- resolve XREFs
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+/*#define DEBUG*/
+#include	"lnk.h"
+#include	<stdio.h>
+#include	<string.h>
+
+int resolve_xrefs(void)
+{
+	Section *sp;
+	Subsection *sbp;
+	Xref *xp;
+	long posn = 0, cposn = common_start;
+	int result = 0;
+
+	/* if you're emulating 'COMMON END', shuffle common sections to
+	 * the end of the list about here. The common sections should end
+	 * up *before* UDATA, which must *always* be the last non-DUMMY
+	 * sction.
+	 */
+	findsection(NULL);					/* Include UDATA in list */
+	for(sp = sections; sp; sp = sp->next) {
+#ifdef DEBUG
+		fprintf(stderr, "%s is at offset %08lx\n", sp->name, posn);
+#endif
+		if(sp->common == 2) {
+			sp->offset = cposn;
+			if(!falsecommon) {
+				sp->length = 0L;
+				for(sbp = sp->contents; sbp; sbp = sbp->next) {
+					sbp->offset = cposn;
+					if(sbp->length > sp->length)
+						sp->length = sbp->length;
+				}
+				cposn += sp->length;
+			} else {
+				for(sbp = sp->contents; sbp; sbp = sbp->next) {
+					sbp->offset = cposn;
+					cposn += sbp->length;
+				}
+				sp->length = cposn - sp->offset;
+			}
+		} else {
+			sp->offset = posn;
+			for(sbp = sp->contents; sbp; sbp = sbp->next) {
+				sbp->offset = posn;
+				posn += sbp->length;
+			}
+			sp->length = posn - sp->offset;
+		}
+		commonsize = cposn - common_start;
+		programsize = posn;
+	}
+	if(Zflag) {
+		Symbol *symp;
+
+		symp = symbol(".COMSIZE", 1);
+		if(!symp->undefined)
+			fputs("Warning: .COMSIZE already defined\n", stderr);
+		else {
+			symp->undefined = 0;
+			symp->offset = commonsize;
+			undefined--;
+		}
+	}
+	for(sp = sections; sp; sp = sp->next)
+		for(sbp = sp->contents; sbp; sbp = sbp->next)
+			for(xp = sbp->xrefs; xp; xp = xp->next) {
+				long value = xp->base;
+				int t;
+				int relfactor = 0;
+				char udprobs = 0;
+				Symbol *addx = NULL;
+				Term *tp;
+
+#ifdef DEBUG
+				fprintf(stderr, "[%s:%s] XREF %8lx ", sbp->module->name, sp->name,
+				        value);
+#endif
+				xp->offset = xp->text - sbp->text + sbp->offset;
+				/*
+				 * Add and subtract the various terms
+				 */
+				for(tp = xp->term, t = xp->terms; t > 0; tp++, t--) {
+#ifdef DEBUG
+					fputc(tp->op, stderr);
+#endif
+					if(tp->sec) {
+#ifdef DEBUG
+						fprintf(stderr, " %s %s ",
+						        tp->u.sec->section->common == 2 ? "COMMON" : "SECTION",
+								tp->u.sec->section->name);
+#endif
+						/*
+						 * Base of a subsection
+						 * Dummy common subsections have no relocation factor
+						 */
+						if(tp->op == '+') {
+							value += tp->u.sec->offset;
+							if(tp->u.sec->section->common != 2)
+								relfactor++;
+						} else {
+							value -= tp->u.sec->offset;
+							if(tp->u.sec->section->common != 2)
+								relfactor--;
+						}
+					} else {
+						/*
+						 * Symbol
+						 * Complications: undefined symbols,
+						 * external symbols
+						 */
+#ifdef DEBUG
+						fprintf(stderr, " %s ", tp->u.sym->name);
+#endif
+						if(tp->u.sym->undefined)
+							udprobs = 1;
+						else {
+							if(tp->op == '+') {
+								if(tp->u.sym->external) {
+									if(addx) {
+										fprintf(stderr,
+										        "Multiple externals [%s, %s] in one XREF in %s:%s\n",
+											    addx->name, tp->u.sym->name,
+												sbp->module->name, sp->name);
+										result = 1;
+									} else {
+										addx = tp->u.sym;
+										relfactor++;
+									}
+								} else {
+									value += tp->u.sym->offset;
+									if(tp->u.sym->base) {
+										value += tp->u.sym->base->offset;
+										if(tp->u.sym->base->section->common != 2)
+											relfactor++;
+									}
+								}
+							} else {
+								if(tp->u.sym->external) {
+									fprintf(stderr,
+									        "Can't subtract external %s in XREF in %s:%s\n",
+											tp->u.sym->name, sbp->module->name, sp->name);
+									result = 1;
+								} else {
+									value -= tp->u.sym->offset;
+									if(tp->u.sym->base) {
+										value -= tp->u.sym->base->offset;
+										if(tp->u.sym->base->section->common != 2)
+											relfactor--;
+									}
+								}
+								relfactor--;
+							} /* end if */
+						} /* end if */
+					} /* end if */
+				} /* end for tp */
+#ifdef DEBUG
+				fputc('\n', stderr);
+#endif
+				/*
+				 * Relocate for externals
+				 * Each external symbol gets a chain of relocation
+				 * addresses.
+				 * Depending on the target micro, we might want
+				 * to generate relocation for either 16 bit or
+				 * 32 bit addresses.
+				 */
+				if(addx && (xp->rule & 0x47) == (WORDREL ? 0x42 : 0x44)) {
+					Relsym *rp, **rpp;
+					Xref *xrp, **xrpp;
+
+					rpp = &xrelsyms;
+					while(rp = *rpp) {
+						int i;
+
+						if(!(i = strcmp(addx->name, rp->sym->name)))
+							break;
+						rpp = &rp->links[i > 0];
+					}
+					if(!rp) {
+						rp = *rpp = safe_malloc(sizeof *rp);
+						rp->links[0] = rp->links[1] = NULL;
+						rp->sym = addx;
+						rp->relchain = 0;
+					}
+					xrpp = &rp->relchain;
+					while(xrp = *xrpp)
+						xrpp = &xrp->nexts;
+					*xrpp = xp;
+					xp->nexts = NULL;
+#ifdef DEBUG
+					fputs("External symbol relocation\n", stderr);
+#endif
+					relfactor--;
+				}
+				/*
+				 * Relocate for locals
+				 * Use bit 7 of the relocation rule to mark relocated XREFs
+				 * (If SROFF ever gets extended to use this bit for something
+				 * else then we must either process it before this point
+				 * or use some other marker.)
+				 */
+				if(relfactor == 1 && (xp->rule & 0x47) == 0x44) {
+					relfactor--;
+					xp->rule |= 0x80;
+					relocations++;
+#ifdef DEBUG
+					fputs("Local symbol relocation\n", stderr);
+#endif
+				}
+				if(relfactor || udprobs) {
+					if(!udprobs)
+						fprintf(stderr,
+						        "XREF in %s:%s has residual relocation of %d\n",
+						        sbp->module->name, sp->name, relfactor);
+					result = 1;
+				}
+				/*
+				 * Check range; store value
+				 * We may want to produce little-endian code e.g.
+				 * if cross assembling to z80, 80x86, etc
+				 */
+				switch(xp->rule & 0x07) {
+					case 1:
+						if(((xp->rule & 0x08) && value > 0x7f)
+						   || ((xp->rule & 0x10) && value < 0)
+						   || value > 0xff || value < -0x80) {
+							fprintf(stderr, "Byte XREF out of range in %s:%s\n",
+							        sbp->module->name, sp->name);
+							result = 1;
+						}
+						*xp->text = value;
+						break;
+					case 2:
+						if(((xp->rule & 0x08) && value > 0x7fff)
+						   || ((xp->rule & 0x10) && value < 0)
+						   || value > 0xffff || value < -0x8000) {
+							fprintf(stderr, "Word XREF out of range in %s:%s\n",
+							        sbp->module->name, sp->name);
+							result = 1;
+						}
+#if OUTPUT_BIGENDIAN
+						xp->text[1] = value;
+						xp->text[0] = value >> 8;
+#else
+						xp->text[0] = value;
+						xp->text[1] = value >> 8;
+#endif
+						break;
+					case 4:
+#if OUTPUT_BIGENDIAN
+						xp->text[3] = value;
+						xp->text[2] = value >>= 8;
+						xp->text[1] = value >>= 8;
+						xp->text[0] = value >> 8;
+#else
+						xp->text[0] = value;
+						xp->text[1] = value >>= 8;
+						xp->text[2] = value >>= 8;
+						xp->text[3] = value >> 8;
+#endif
+						break;
+				}
+			} /* end for xp */
+	return result;
+}

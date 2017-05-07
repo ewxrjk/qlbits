@@ -1,0 +1,163 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* decisions and remakes */
+/*#define DEBUG*/
+#include	<stdio.h>
+#include	<stdlib.h>
+#include	"make.h"
+
+#if (C68 || __C68__) && (QDOS || __QDOS__)
+int system(const char *);
+#endif
+
+static unsigned long max_d_date(struct target *);
+
+int decide(struct target *t)
+{
+	struct dset *ds;
+	struct depend *d;
+	unsigned long date;
+	int rval = 0;
+
+	assert(t);
+	if(t->primary)
+		t = t->primary;
+	if(t->visiting) {
+		fprintf(stderr, messages[MSG_CIRCLE], t->name);
+		exit(NOT_IMPLEMENTED);
+	}
+	debug(printf("DEBUG: decide('%s')\n", t->name););
+	if(t->remake)
+		return 0;
+	t->visiting = -1;
+	if(!t->depend) {
+		/*
+		 * no dependent files: remake always
+		 */
+		if(t->command != NULL) {
+			t->remake = -1;
+			rval = -1;
+		}
+	} else {
+		/*
+		 * some dependent files: only remake if we are out of date
+		 */
+		date = max_d_date(t);
+		debug(printf("DEBUG: target date is %lX; max date is %lX\n", t->date, date););
+		if(date >= t->date) {
+			t->remake = -1;
+			rval = -1;
+			for(ds = t->depend; ds; ds = ds->next) {
+				for(d = ds->depend; d; d = d->next) {
+					decide(d->target);
+					if(d->target->remake) {
+						d->changed = -1;
+						ds->changed = -1;
+					}
+				}
+			}
+		}
+	}
+	debug(printf("DEBUG: will %sremake '%s'\n", t->remake ? "" : "not ", t->name););
+	t->visiting = 0;
+	return rval;
+}
+
+void remake(struct target *t)
+{
+	struct dset *ds;
+	struct depend *d;
+
+	assert(t);
+	if(t->primary)
+		t = t->primary;
+	if(t->visiting) {
+		fprintf(stderr, messages[MSG_CIRCLE], t->name);
+		exit(NOT_IMPLEMENTED);
+	}
+	debug(printf("DEBUG: remake('%s')\n", t->name););
+	if(!t->remake)
+		return;
+	t->visiting = -1;
+	for(ds = t->depend; ds; ds = ds->next)
+		for(d = ds->depend; d; d = d->next)
+			remake(d->target);
+	t->remake = 0;
+	execute(t, NULL, t->command);
+	for(ds = t->depend; ds; ds = ds->next)
+		execute(t, ds, ds->command);
+	debug(printf("DEBUG: remade '%s'\n", t->name););
+	t->visiting = 0;
+}
+
+void execute(struct target *t, struct dset *ds, struct command *c)
+{
+	int r;
+
+	while(c) {
+		assert(c->command);
+		assert(t);
+		debug(printf("DEBUG: do command '%s'\n", c->command););
+		expandmacros(c->command, expanded, ds, t, 1);
+		if(!execflag || (!c->quiet && verbose))
+			puts(expanded->text);
+		if(execflag) {
+			r = system(expanded->text);
+			if(r) {
+				fputs(messages[MSG_EPREFIX], stderr);
+#if QDOS || __QDOS__
+				if(r < 0 && r > -22)
+					fputs(ql_errors[-r-1], stderr);
+				else
+#endif
+					fprintf(stderr, messages[MSG_ERROR], r);
+				if(!c->ignore && !ignoreflag) {
+					fputs(messages[MSG_TERMINATE], stderr);
+					exit(EXIT_FAILURE);
+				}
+			}
+		}
+		c = c->next;
+	}
+}
+
+/*
+ * Find the most recent update date of a set of targets
+ * If >=1 of the targets is to be remade, maximum update date
+ * is as far in the future as possible.
+ */
+static unsigned long max_d_date(struct target *t)
+{
+	struct dset *ds;
+	struct depend *d;
+	struct target *tp;
+	unsigned long date = 0;
+	unsigned long rd;
+
+	assert(t);
+	for(ds = t->depend; ds; ds = ds->next)
+		for(d = ds->depend; d; d = d->next) {
+			tp = d->target;
+			if(tp->remake)
+				return 0xffffffff;
+			if((rd = tp->date) > date)
+				date = rd;
+			if((rd = max_d_date(tp)) > date)
+				date = rd;
+		}
+	return date;
+}

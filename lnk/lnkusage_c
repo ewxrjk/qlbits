@@ -1,0 +1,23 @@
+/*
+ * Linker bits and pieces
+ *
+ * (c) 1993 Richard Kettlewell
+ */
+char _prog_name[] = "LNK";
+
+static void usage(void)
+{
+	fputs("\nUsage:\n", stderr);
+	fputs("    LNK [-ACDNRXYZabcdghinvxz] [-m[s][t]] [-o output] [-u symbol]\n", stderr);
+	fputs("        [-S size] [-L path] [-s file] file ... [-lr library] ...\n\n", stderr);
+	fputs("    -L    Extra library path                  See manual for more info!\n", stderr);
+	fputs("    -c    Don't overlay common sections -b    Align to longword boundaries\n", stderr);
+	fputs("    -s    Set startup file              -d    LD style relocation table\n", stderr);
+	fputs("    -g    GST style relocation table    -h    This help\n", stderr);
+	fputs("    -i    MAIN == main                  -l,-r Scan a library\n", stderr);
+	fputs("    -m    Output map                    -n    MAIN != main\n", stderr);
+	fputs("    -o    Set output name [a_out]       -a    Don't always relocate\n", stderr);
+	fputs("    -ms   Output map+symbol table       -t    Send -m, -ms output to stdout\n", stderr);
+	fputs("    -u    Create an undefined symbol    -v    Verbose mode\n", stderr);
+	fputs("    -x    Write rtm description         -z    Non-executable output\n", stderr);
+}

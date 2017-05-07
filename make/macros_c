@@ -1,0 +1,292 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/* macro handling */
+/*#define DEBUG*/
+#include	"make.h"
+
+int isalnum(int);
+char *getenv(const char *);
+void free(void *);
+char *strrchr(const char *, int);
+size_t strlen(const char *);
+
+/* non-standard:- */
+int stricmp(const char *, const char *);		/* Case independent strcmp() */
+char *strupr(char *);							/* Do toupper() to everything */
+
+static struct macro {
+	struct macro *left,*right;
+	char *name;
+	char *value;
+	char force;
+} *macros;
+
+static void copyto(Line to, char *from)
+{
+	register char *q;
+	int c;
+
+	if(q = from)
+		while(c = *q++)
+			l_putc(to, c);
+}
+
+/*
+ * Define a macro
+ * Sets the value right here, overwriting any previous definition.
+ */
+void define_macro(char *name, char *value, int force)
+{
+	struct macro *m,**mm;
+	int i;
+
+	/* if we did -e and are defining from the Makefile or built-ins,
+	 * or we are defining from built-ins anyway, see if there's an
+	 * environment to match
+	 */
+	if((envflag && force <= 0) || force < 0) {
+		char *p;
+
+		if(p = getenv(name)) {
+			value = p;
+			force = 1;
+		}
+	}
+
+	mm = &macros;
+	while((m = *mm) && (i = stricmp(name, m->name)))
+		mm = i < 0 ? &m->left : &m->right;
+	if(!m) {
+		*mm = NEW(m);
+		m->left = m->right = NULL;
+		m->name = strupr(safe_strdup(name));
+		m->force = force > 0 ? 1 : 0;
+	} else {
+		/*
+		 * Don't redefine where the command line gave a definition
+		 * except to overwrite with a new command line definition
+		 */
+		if(m->force && force <= 0)
+			return;
+		free(m->value);
+	}
+	m->value = safe_strdup(value);
+}
+
+/*
+ * Find a macro
+ * Return the address of its text. If the macro is not defined, look for
+ * an environment variable of the same name; failing that, return NULL.
+ */
+char *find_macro(char *name)
+{
+	struct macro *m;
+	int i;
+
+	m = macros;
+	while(m && (i = stricmp(name, m->name)))
+		m = i <0 ? m->left : m->right;
+	return m ? m->value : getenv(name);
+}
+
+/*
+ * True if a macro is defined
+ */
+int mdefined(char *name)
+{
+	struct macro *m;
+	int i;
+
+	m = macros;
+	while(m && (i = stricmp(name, m->name)))
+		m = i < 0 ? m->left : m->right;
+	return m ? 1 : 0;
+}
+	
+
+/*
+ * Expand macros in a string from one place to the other
+ * If success, return 0; otherwise return non-zero
+ * A target may be associated with the expansion for the purposes of
+ * expanding $<, $* and $@.
+ *
+ * I define temp as a static variable for 2 closely related reasons. Firstly,
+ * we don't want to waste time allocating and deallocating whenever we
+ * get into expandmacros() --- static means we can re-use space, it stays
+ * allocated between calls. Secondly, static means all fields are initially
+ * 0 and so realloc() will allocate space on the first call.
+ * ("realloc(NULL,X)" is the same as "malloc(X)".)
+ */
+int expandmacros(char *from, Line to, struct dset *ds, struct target *t, int final)
+{
+	char *p,*q,*r;
+	int c;
+	int rm;
+	static Line temp;
+
+	p = from;
+	to->length = 0;
+	while(c = *p++) {					/* Scan string */
+		if(c != '$')					/* $ => macro */
+			l_putc(to, c);				/* Everything else is inserted straight */
+		else switch(c = (unsigned char)*p++) {			
+			case '(':
+				c = ')';
+				goto ordmacro;
+			case '{':
+				c = '}';
+				goto ordmacro;
+
+			case '[':
+				c = ']';
+ordmacro:
+				temp->length = 0;
+				while(isalnum((unsigned char)*p) || *p == '_' || *p == '.')
+					l_putc(temp, *p++);
+				l_putc(temp, 0);
+				if(c != 0 && *p++ != c) {
+					error(messages[MSG_ILLMCHAR], from, p - from);
+					return -1;
+				}
+				if(q = find_macro(temp->text))
+					copyto(to, q);
+				else
+					error(messages[MSG_UNDEFMACRO], from, (int)(p - from - temp->length + 1));
+				break;
+
+			case '*':					/* Target less extension */
+				if(t) {
+					q = t->name;
+					r = strrchr(q, EXTCHAR);	/* Find start of extension */
+					while(q != r && (c = *q++))
+						l_putc(to, c);
+				} else {
+					if(!final)
+						l_putc(to, '$');
+					l_putc(to, c);
+				}
+				break;
+
+			case '@':					/* Target */
+				if(t) {
+					debug(printf("DEBUG: $@ = %s\n", t->name););
+					copyto(to, t->name);
+				} else {
+					if(!final)
+						l_putc(to, '$');
+					l_putc(to, c);
+				}
+				break;
+
+			case '?':					/* Dependent files which changed */
+				rm = 0;
+current_depend:
+				if(ds) {
+					struct depend *d;
+					int flag = 0;		/* Any names inserted yet? */
+
+					if(rm || ds->changed) {
+						for(d = ds->depend; d; d = d->next) {
+							if(rm || d->changed) {
+								if(flag)
+									l_putc(to, ' ');
+								else
+									flag = 1;
+								debug(printf("DEBUG: $</$? generate '%s'\n", d->target->name););
+								copyto(to, d->target->name);
+							}
+						}
+					}
+				} else {
+					if(!final)
+						l_putc(to, '$');
+					l_putc(to, c);
+				}
+				break;
+
+			case '<':					/* Dependent files */
+				rm = 1;
+				goto current_depend;
+
+			case '!':					/* All dependent files which changed */
+				rm = 0;
+all_depend:
+				if(t) {
+					struct dset *dsp;
+					struct depend *d;
+					int flag = 0;
+					
+					for(dsp = t->depend; dsp; dsp = dsp->next)
+						if(rm || dsp->changed) {
+							for(d = dsp->depend; d; d = d->next) {
+								if(rm || d->changed) {
+									if(flag)
+										l_putc(to, ' ');
+									else
+										flag = 1;
+									debug(printf("DEBUG: $!/$> generates '%s'\n", d->target->name););
+									copyto(to, d->target->name);
+								}
+							}
+						}
+				} else {
+					if(!final)
+						l_putc(to, '$');
+					l_putc(to, c);
+				}
+				break;
+			
+			case '>':					/* All dependent files */
+				rm = 1;
+				goto all_depend;
+
+			case '$':
+				if(!final)
+					l_putc(to, '$');
+				l_putc(to, c);
+				break;
+
+			default:
+				if(isalnum(c)) {
+					--p;
+					c = 0;
+					goto ordmacro;
+				}
+				l_putc(to, c);
+				break;
+		}
+	}
+	l_putc(to, 0);						/* Terminate buffer */
+	return 0;							/* No error */
+}
+
+static void dump_macro(struct macro *m)
+{
+	if(m) {
+		dump_macro(m->left);
+		printf("%s = %s\n",m->name,m->value);
+		dump_macro(m->right);
+	}
+}
+
+void dump_macros(void)
+{
+	puts(messages[MSG_MACROTITLE]);
+	dump_macro(macros);
+	fputc('\n',stdout);
+}
+

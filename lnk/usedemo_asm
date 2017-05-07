@@ -1,0 +1,93 @@
+********************************************************************************
+* Demo for RTMs                                      (c) 1993 Richard Kettlewell
+*
+* All that needs doing to reference symbols in RTMs is to XREF.L them somewhere
+* and use instructions like these:
+*
+*        jsr      name
+*        lea      name,a0
+*        move.l   #name,a0
+*        move.l   #name,d0
+*        move.b   name,d0
+*        move.w   name,d0
+*        etc...
+*
+* Don't use PC-relative addresses, the linker will say nasty things to you!
+*
+         xref.l   opencon
+         xref.l   write
+         xref.l   waitkey
+         xref.l   cls
+*
+mt.inf   equ      $00                        ; Get info
+sv_drlst equ      $44                        ; Driver list
+d.magic  equ      '$RTM'                     ; Magic number
+d_link   equ      $00                        ; Link to next driver
+d_magic  equ      $04                        ; Magic number to find driver
+d_add    equ      $10                        ; Entry point to add names
+d_reloc  equ      $14                        ; Entry point to relocate
+*
+         section  TEXT
+*
+.prgbase bra.s    start
+         ds.b     4
+         dc.w     $4afb
+         dc.w     4,'DEMO'
+*
+start    trap     #0                         ; Stop list changing
+         moveq    #mt.inf,d0
+         trap     #1
+         move.l   sv_drlst(a0),a0            ; Head of list
+*
+findloop move.l   a0,d0                      ; Fallen off list yet?
+         beq.s    finderr
+         cmp.l    #d.magic,d_magic(a0)       ; Found RTM driver?
+         beq.s    foundit
+         move.l   d_link(a0),a0              ; Next list element
+         bra      findloop
+*
+finderr  and.w    #$dfff,sr                  ; Back to user mode
+         lea      nortm(pc),a0
+         move.l   a0,d0
+         bset     #31,d0                     ; Make custom error message
+*
+exit     move.l   d0,d3
+         moveq    #5,d0
+         moveq    #-1,d1
+         trap     #1
+         bra      exit
+*
+foundit  and.w    #$dfff,sr                  ; Back to user mode
+*
+         lea      .prgbase(pc),a1
+         move.l   a1,a2
+         move.l   a1,a3
+         add.l    #.BSSBASE-.prgbase,a3      ; Address of table
+         add.l    #.nmspace-.prgbase,a1      ; Name space to relocate in
+         move.l   d_reloc(a0),a4             ; Relocation routine
+         jsr      (a4)                       ; Relocate ourselves
+*
+* Now we're relocated
+*
+         jsr      opencon
+         bne      exit
+         jsr      cls
+         lea      msg,a1
+         jsr      write
+         jsr      waitkey
+         moveq    #0,d0
+         bra      exit
+*
+.nmspace dc.b     3,'ASM'
+*
+nortm    dc.w     enortm-*-2
+         dc.b     'no RTM driver',10
+enortm
+*
+msg      dc.w     emsg-*-2
+         dc.b     'Success testing RTM driver',10
+emsg
+*
+         section  UDATA
+.BSSBASE
+         end

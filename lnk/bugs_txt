@@ -1,0 +1,50 @@
+LNK bug list
+============
+
+Some of these are not so much bugs as differences from other linkers, or
+the absence of a feature that seemed to trivial to be worth coding for.
+You will mostly find these do not cause problems.
+
+Bugs marked with [F] will probably get fixed; those marked with [N] will
+never get fixed. I haven't decided about those marked [?].
+
+o	The precise set of c68 and lnk options which can be applied to
+	cc and xcc is rather badly documented. [F]
+
+o	XREFs which should get overwritten due to backwards OFFSET aren't
+	(not always, anyway.) [N]
+
+o	Report of undefined symbols not sorted. [N]
+
+o	Some SROFF errors cause immediate termination of the link; most
+	just cause the file being worked on to be abandoned. See load_c
+	for explanations --- search for exit . [?]
+
+o	Libraries must be sorted in a specific order to resolve
+	reference chains. [N]
+	The same applies to LD and GST Linker.
+
+o	ORG directive not supported. [N]
+
+o	UNPROTO is not supported by CC. [N]
+
+o	Only 'COMMON DUMMY' is supported. [F]
+
+Since this is a fairly early version, I've left various assertions
+active in the code. If you get an 'assertion failed' message then you've
+probably found a bug; it may be possible to construct a SROFF that
+contains sufficient errors to make LNK fail an assertion but you should
+get a 'fatal error' message first.
+
+The following bugs apply to version 1.0 only:
+
+o	The contents of 'gaps' is genuinely undefined. This is permitted
+	by the SROFF definition but isn't very convenient. [F]
+
+All newly discovered bugs should be reported to:
+
+	Richard Kettlewell
+        rjk@greenend.org.uk
+
+RJK 28/07/1993
+    11/08/1993

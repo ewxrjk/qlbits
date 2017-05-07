@@ -1,0 +1,152 @@
+/*  Copyright (C) 1993 Richard Kettlewell
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*/
+/*
+ * system() function for C68
+ *
+ * Hacked down to size to be more suitable for Make.
+ *
+ * To make this suitable for use as an ANSI/ISO C library system() function,
+ * you must:
+ *
+ *		--- remove "MAKEPATH" from the list of command paths
+ *		--- replace the calls to open(), close(), fstat(), execvp() call
+ *		    functions which do exactly the same jobs but are name-space
+ *		    clean
+ *		--- do the same for S_ISDIR if that is a function (it's usually
+ *		    a macro, though: it's probably NEVER been a function.)
+ *
+ * If getenv() has side effects (C68 version doesn't) then you
+ * must find a way around that as well, since the only function allowed
+ * to have the side effects of getenv() is getenv() itself.
+ *
+ * 27/6/1993 Further efforts to remove bugs due to attempts to execute
+ *           directories
+ *
+ * 28/7/1993 You can now use ':' as well as ';' to separate directories
+ *           in PATH and MAKEPATH.
+ */
+#include	<fcntl.h>
+#include	<sys/types.h>
+#include	<sys/stat.h>
+
+#include	<stdio.h>
+#include	<ctype.h>
+#include	<stdlib.h>
+#include	<qdos.h>
+#include	<string.h>
+
+int close(int);
+int execvp(char *, int *, char **);
+
+/* Does a specific file exist? */
+/* ...only believe files exist if they're not directories */
+static int tryfile(char *p)
+{
+	int fd;
+	struct stat sb;
+
+	if((fd = open(p, O_RDONLY)) < 0)
+		return 0;
+	if(fstat(fd, &sb)) {
+		close(fd);
+		return 0;
+	}
+	close(fd);
+	if(S_ISDIR(sb.st_mode))
+		return 0;
+	return 1;
+}
+
+/*
+ * Look on path for a specific file
+ */
+static char *findfile(char *f)
+{
+	static char buf[FILENAME_MAX];
+	static char *paths[] = { "MAKEPATH", "PATH", "PROG_USE", NULL };
+	char **pp, *p, *q;
+	int inf;
+
+	if(isdevice(f, &inf)) {
+		if(tryfile(f))
+			return f;
+		else
+			return NULL;
+	}
+	p = getenv("DATA_USE");
+	strcpy(buf, p);
+	strcat(buf, f);
+	if(tryfile(buf))
+		return buf;
+	for(pp = paths; *pp; pp++)
+		if(p = getenv(*pp))
+			while(*p) {
+				q = buf;
+				while(*p && *p != ';' && *p != ':')
+					*q++ = *p++;
+				if(q > buf) {
+					if(q[-1] != '_')
+						*q++ = '_';
+					strcpy(q, f);
+					if(tryfile(buf))
+						return buf;
+				}
+				if(*p)
+					p++;
+			}
+	return NULL;
+}
+
+/*
+ * Execute a command. If s == NULL, return 0 for no command processor, 1 for
+ * command processor. If s != NULL, execute it as a command.
+ *
+ * This what ANSI/ISO C requires of the system() function
+ */
+int system(char *s)
+{
+	char *tail[3], pname[FILENAME_MAX+1];
+	int i;
+	int c;
+
+	if(!s)
+		return 1;
+	while((isspace)((unsigned char)*s))
+		s++;
+	if(!*s)
+		return -21;
+	i = 0;
+	while((c = (unsigned char)*s++) && !(isspace)(c))
+		if(i < FILENAME_MAX)
+			pname[i++] = c;
+	pname[i] = 0;
+	while((isspace)(c))
+		c = (unsigned char)*s++;
+	tail[1] = s-1;
+	tail[2] = NULL;
+	if((tail[0] = findfile(pname))) {
+#if 0
+		/* ANSI lets us do fflush(NULL) to flush everything --- but C68 lib doesn't */
+		fflush((FILE *)NULL);
+#else
+		fflush(stdout);
+		fflush(stderr);
+#endif
+		return execvp(tail[0], (int *)-1L, tail);
+	} else
+		return -7;
+}

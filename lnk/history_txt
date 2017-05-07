@@ -1,0 +1,56 @@
+------------------------------------------------------------------------
+
+                       LNK Package Update History
+
+------------------------------------------------------------------------
+
+Version 1.1
+
+o	What was cc is now xcc (i.e. the one with LNK built in) with
+	slightly altered option handling.
+
+o	There is a new program which is just cc, without any linker. It
+	calls the linker like ordinary cc programs. The linker is
+	usually lnk but you can change this with Qjump CONFIG or an
+	environment variable.
+
+o	Bug fix in load_c (1.0 is safe, though!)
+	Also, 'gaps' are now zeroised (cf bugs_txt)
+
+o	Better temporary filenames (still needs work)
+	_o and _rel files are not put in the temporary directory, even
+	if they're going to get deleted.
+
+o	main_c now has many #include directives; this is an effort to
+	reduce redundant re-makes (due to three different programs being
+	generated from the same source file.)
+
+o	Added '[unused]' message to symbol table; this appears if the
+	symbol is not used outside the module which defines it. (It may
+	still be used in that module.)
+
+o	Added .COMSIZE and -A, -Z options to LNK/XCC. (I'm running out
+	of option letters...)
+
+o	Debugged resolve_c's handling of common sections and tidied its
+	handling of undefined symbols (you no longer get complaints
+	about residual relocations; you didn't always anyway.)
+
+o	rtm_rext 1.01: go into supervisor mode at appropriate times so
+	that the lists of names don't get changed while they're being
+	read or updated.
+
+	Also, improved error handling when called within SuperBASIC.
+
+o	insrtm_rel 1.01: better error handling, more efficient code
+	(slightly), optional installation message.
+
+o	Release 13/8/1993 to Dave Walker
+
+------------------------------------------------------------------------
+
+Version 1.0
+
+o	Released 8/8/1993
+
+------------------------------------------------------------------------

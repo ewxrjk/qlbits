@@ -1,0 +1,101 @@
+********************************************************************************
+* RTM Installation                                   (c) 1993 Richard Kettlewell
+*
+* This file replaces the crt_o file and is used as a startup routine
+* for RTMs. All you have to do is set up the .RTMDEF table, another
+* table in section RTM, decide which files to include in the link and
+* then call LNK
+*
+*        LNK -o<name> -v -x -c insrtm_rel <name> ...
+*
+* It's probably a bad thing if any library modules are included, though
+* it might be convenient to turn libraries into RTMs that way --- be
+* careful about non-dynamic variables, though (see discussion elsewhere.)
+*
+* NB you LRESPR the output, you don't EXEC it.
+*
+mt.inf   equ      $00                        ; Get info
+io.sstrg equ      $07
+sv_drlst equ      $44                        ; Driver list
+d.magic  equ      '$RTM'                     ; Magic number
+d_link   equ      $00                        ; Link to next driver
+d_magic  equ      $04                        ; Magic number to find driver
+d_add    equ      $10                        ; Entry point to add names
+d_reloc  equ      $14                        ; Entry point to relocate
+*
+         xref     .RTMDEF                    ; Table of names
+*
+         xdef     .RTMBASE                   ; Base of section TEXT = base of RTM
+         xdef     .BSSBASE                   ; Base of section UDATA
+*
+         comment  INSRTM v1.01 (c) 1993 Richard Kettlewell
+*
+         section  AFIRST                     ; Must come first
+*
+.RTMBASE trap     #0                         ; Stop list changing
+         moveq    #mt.inf,d0
+         trap     #1
+         move.l   sv_drlst(a0),a0            ; Head of list
+*
+findloop move.l   a0,d0                      ; Fallen off list yet?
+         beq.s    finderr
+         cmp.l    #d.magic,d_magic(a0)       ; Found RTM driver?
+         beq.s    foundit
+         move.l   d_link(a0),a0              ; Next list element
+         bra      findloop
+*
+* Unlike the situation of an application program, there's no good reason
+* to try and do the relocation ourselves, since the absence of rtm_rext
+* will prevent the RTM from being installed anyway.
+*
+finderr  and.w    #$dfff,sr                  ; Back to user mode
+         lea      nortm(pc),a0
+         move.l   a0,d0
+         bset     #31,d0                     ; Make custom error message
+         tst.l    d0                         ; Set flags (BSET clears Z here)
+         rts                                 ; Return to SuperBASIC
+*
+foundit  and.w    #$dfff,sr                  ; Back to user mode
+*
+         lea      .RTMBASE(pc),a1            ; Base for 32 bit (pc) addresses
+         move.l   a1,a2
+         move.l   a1,a3
+         add.l    #.BSSBASE-.RTMBASE,a3      ; Address of table
+         add.l    #8+.RTMDEF-.RTMBASE,a1     ; Name space to relocate in=same
+         move.l   d_reloc(a0),a4             ; Relocation routine
+         move.l   a0,-(a7)
+         jsr      (a4)                       ; Relocate ourselves
+         bne      failed                     ; Something missing?
+         move.l   (a7)+,a0
+         move.l   #.RTMDEF,a1                ; We are relocated by now
+         move.l   d_add(a0),a4               ; Add our names
+         jsr      (a4)                       ; That's it
+         bne      failed                     ; Problem?
+         move.l   #name,a1
+         cmp.w    #$4afb,(a1)+
+         bne      failed
+         moveq    #io.sstrg,d0
+         move.w   (a1)+,d2
+         moveq    #-1,d3
+         sub.l    a0,a0
+         trap     #3
+*
+failed   rts
+*
+nortm    dc.w     enortm-*-2
+         dc.b     'rtm_rext not installed',10
+enortm
+*
+         section  RTMNAME
+*
+* 11/8/1993 Installation message support
+*
+name     ds.w     0
+*
+         section  UDATA
+*
+* Yes, RTMs need relocating as much as any other code. However, they aren't
+* allowed to use UDATA for anything else.
+*
+.BSSBASE
+         end
