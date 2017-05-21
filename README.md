@@ -14,7 +14,7 @@ What's here:
 - [Make](make) - 'make' implementation
 - [Nul device](nulldev) - NUL device (68K asm)
 - [Othello](othello) - Othello game
-- [CA](rjk_ca) - cellular automaton
+- [CA](ca) - cellular automaton
 - [Hbutils](hbutils) - Hotkey and button utilities (68k asm)
 
 All are in C unless specified otherwise (specifically they were
