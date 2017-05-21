@@ -15,6 +15,7 @@ What's here:
 - [Nul device](nulldev) - NUL device (68K asm)
 - [Othello](othello) - Othello game
 - [CA](rjk_ca) - cellular automaton
+- [Hbutils](hbutils) - Hotkey and button utilities (68k asm)
 
 All are in C unless specified otherwise (specifically they were
 written for the [C68](http://www.dilwyn.me.uk/c/) compiler). See the
