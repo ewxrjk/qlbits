@@ -1,0 +1,489 @@
+------------------------------------------------------------------------
+
+                      Hotkey and Button Utilities
+
+                         By Richard Kettlewell
+
+                              Release 1.2b
+
+------------------------------------------------------------------------
+
+The hbutils_rext extension is intended to be used with Qpac2. It
+provides a few extensions:
+
+HOT_DATE        put the date, in a wide variety of formats, onto a
+                hotkey.
+
+Capslock        caps lock indicator in a button
+
+Clock           clock in a button
+
+Free            free memory indicator in a button
+
+MemView         memory map in a button
+
+DATAD$          data default in a button (new with release 1.1)
+
+LoadAve         system load average graph (new with release 1.2)
+
+It should be possible, now, to use the buttons without Qpac2 (though you
+will still need hot_rext or equivalent) provided you always use the '@'
+construction described below.  The HOT_DATE function only needs
+hot_rext, not Qpac2.
+
+(Remember that ptr_gen and wman must be loaded before hot_rext.)
+
+------------------------------------------------------------------------
+
+                                Changes
+
+------------------------------------------------------------------------
+
+The purposes of this section are threefold:
+
+        1) to provide users with an indication of what's new
+
+        2) to give credit to those who have supplied suggestions and bug
+           fixes
+
+        3) to maintain a revision history for the author's convenience.
+
+Release 1.2b:
+
+modifications via Quanta helpline to -
+   enable working of freemem button
+   and load average button with minerva
+
+Release 1.2a:
+
+05/01/1995 Clarifications to manual
+           MemView now truncates long job names
+
+Release 1.2:
+
+17/09/1994 Finished and documented load average button.
+
+09/08/1994 Corrected positioning and clock bugs
+
+Release 1.1:
+
+29/07/1994 All the buttons can now be positioned anywhere on the screen.
+           Added the DATAD$ button
+           (both suggested by Ivan Hall)
+
+20/07/1994 Capslock can now have on/off strings of different lengths
+           (previously you had to pad them out with spaces)
+
+------------------------------------------------------------------------
+INSTALLATION
+
+from this disk LRESPR 'flp2_hbutils_hbutils_rext'
+
+________________________________________________________________________
+
+
+                                HOT_DATE
+
+------------------------------------------------------------------------
+
+This function works much like the HOT_... functions that are installed
+by hot_rext. However, instead of calling up a window or inserting just
+any old string, the hotkey types in the current date in some specified
+format.
+
+The simplest use is in the form:
+
+        ERT HOT_DATE('d')
+
+...after which ALT-d will type in the date in the format:
+
+        22:34:22 Aug 22 1993
+
+You can alter this format with CONFIG, as supplied with Qpac2 and many
+other programs; however, there is a considerably easier way:
+
+        ERT HOT_REMV('d')
+        ERT HOT_DATE('d','%d $M %y')
+
+...which will make ALT-d produce something like thsi:
+
+        22 August 1993
+
+The full list of 'special' sequences in the string is:
+
+        $d      3 characters day from DATE$
+        $m      3 characters month from DAY$
+        $D      full day name
+        $M      full month name
+        $H      AM/PM, length depends on configured names
+        %y      4 digits year (1961 -- 2097)
+        %d      2 digits day of month (1 -- 31)
+        %h      2 digits hour (0 -- 23)
+        %m      2 digits minute (0 -- 59)
+        %s      2 digits second (0 -- 59)
+        %M      2 digits month (1 -- 12)
+        %%      %
+        $$      $
+
+The effect of pairs beginning '$' or '%' and not listed here is
+undefined and subject to change in future versions.
+
+The 'full' day and month names are given in English; you can enter the
+names in other languages through CONFIG. If you send me lists of
+day/month names in your language, I'll incorporate them into the source
+of HBUTILS and save you the typing if you ever get later version.
+
+$H isn't a lot of use at the moment since once can't generate a 12-hour
+hour number. Maybe in a later version...
+
+The HOT_DATE hotkey(s) will show up with type 'EXEC DATE' in lists given
+by the HOT_LIST command and Hotkeys menu; the 'name' is actually the
+format string preceded by 'DATE '.
+
+------------------------------------------------------------------------
+
+                                Capslock
+
+------------------------------------------------------------------------
+
+This is a very simple utility implemented as an executable Thing. It
+installs itself in the Button Frame and constantly displays the current
+'caps lock' status. Since it is an executable Thing, you could put it on
+a hotkey if you want but the sensible way to use it is
+
+        EXEP 'Caps Button'
+
+...and it will appear. You could also start it from the Qpac2 'Wake'
+menu. To deactivate it, either use
+
+        RJOB Capslock
+
+or use one of the Qpac2 'Jobs' or 'Rjob' menus.
+
+If for some reason you re-load hbutils_rext then the 'new' Caps Button
+Thing will only replace the old one if there is no 'active' copy i.e. no
+Job is using the Thing.
+
+If Qpac2 (in particular, the Button Frame Thing) is not installed then
+this utility won't work.
+
+If you pass a command line to the Capslock button, in may end with a
+construction of the form
+
+        @ x y
+
+e.g.
+
+        EXEP'Caps Button';'@ 100 100'
+
+in which case the button will not be put in the button frame but instead
+be placed at the specified position on the screen.
+
+------------------------------------------------------------------------
+
+                                 Clock
+
+------------------------------------------------------------------------
+
+This utility creates a button with the time and/or date in it, using the
+same type of format string as HOT_DATE. You use it as follows:
+
+        EXEP'Clock Button'
+
+or
+
+        EXEP'Clock Button';'%h:%m:%s'
+
+From Qpac2, you can execute it from the 'Wake' menu or (if you want to
+supply a format string) the 'Exec' menu.
+
+The button size is determined by the length of the date string at the
+time it starts up, which may be a bug.
+
+The command line may be followed with an '@' construction as above; for
+example:
+
+        EXEP'Clock Button';'%h:%m:%s@100 100'
+
+------------------------------------------------------------------------
+
+                                  Free
+
+------------------------------------------------------------------------
+
+This utility generates a button which contains the amount of free memory
+in the system (actually the result of MT.FREE/SMS.FRTP which amounts to
+the same thing if you've been careful about heap/tpa fragmentation.)
+
+You use in the form
+
+        EXEP'Free Memory Button'
+
+or
+
+        EXEP'Free Memory Button';'format string'
+
+...or from Qpac2 as above.
+
+The format string contains ordinary characters which are printed 'as
+is', or special sequences as follows:
+
+        %b      free memory in bytes
+        %k      free memory in kilobytes
+        %%      %
+
+You might therefore say
+
+        EXEP'Free Memory Button';'%kK'
+
+The command line may end in an '@' construction as above.
+
+------------------------------------------------------------------------
+
+                                MemView
+
+------------------------------------------------------------------------
+
+This utility provides a graphic display of the state of the Qls memory.
+As with the other programs, it only works as a button; at regular
+intervals, it changes the Job it is monitoring. You can force it to skip
+straight to the next one by pressing a key or mouse button while the
+pointer is over the button.
+
+The default colours --- they may be changed with CONFIG --- are:
+
+        red (at the leftmost edge) --- system memory, i.e. the system
+        variables, slave blocks and Job and channel tables.
+
+        green --- free memory, i.e. memory not being used for anything
+        immediate (though the filing system might be using it for slave
+        blocks.)
+
+        white --- Job memory. The name of the Job to which the 'white'
+        memory belongs is displayed on the right of the memory map.
+
+        red (at the leftmost and rightmost edge) --- RESPR memory, i.e.
+        memory allocated using the RESPR function, and also some system
+        tales.
+
+Memory belonging to Jobs other than the current one is always black and
+can't be changed to another colour.
+
+To start the button, use:
+
+        EXEP'Memory View Button'
+
+The command line may end with an '@' construction as above.
+
+To remove it:
+
+        RJOB MemView
+
+You can use Qpac2 as above.
+
+If MemView believes that the Ql's memory has become corrupted, then it
+replaces the map with a message to this effect. It then suspends itself.
+Since it 'picks' itself to the top of the pile of windows when this
+happens, you may have to press CTRL-C or some hotkey to get to some Job
+where you can do something useful.
+
+If you arrange for MemView's suspension to be released, it forgets about
+its "memory corrupted" claim and checks again. If you've solved the
+problem then MemView will reflect this. (Most soluble problems are
+rather artificial, so your best bet is to save any important data ---
+unless you think this may corrupt the disk, not impossible --- and
+reboot.)
+
+The checks MemView makes can't catch all memory corruption; if OS
+designers had their heads screwed on right they'd maintain incremental
+checksums on system tables so that MemView and similar programs could
+catch corruption more effectively.
+
+(Ideally we'd have memory protection, as under Un*x, so that rogue
+applications couldn't do any damage, but we don't.)
+
+------------------------------------------------------------------------
+
+                             DATAD$ Button
+
+------------------------------------------------------------------------
+
+You can now have the current default data directory shown in a button:
+
+        EXEP'DATAD$ Button'
+
+...or from the Qpac2 Exec menu as before. The usual convention with '@'
+can be applied to position the button.
+
+This really ought to be generalised to support any of the default
+devices some time, but the data default is the only one that will ever
+be changed in a well-organised system...
+
+------------------------------------------------------------------------
+
+                                LoadAve
+
+------------------------------------------------------------------------
+
+This draws a graph of a weighted average of recent system load:
+
+        EXEP'Load Average Button';'64 42'
+
+...specifies that the button should be 64 pixels across and 42 pixels
+deep (including the border.) It is recommendd that the height be a
+multiple of 14 to maintain consistency with other buttons. The '@'
+convention above applies.
+
+The height of the bar is an indication of the CPU time that was
+available to LoadAve when it was doing its computations --- the higher
+the bar, the less time, so other processes are doing more work. This
+mechanism may be changed later to give a truer indication of the amount
+of work the CPU is doing.
+
+The heights are actually calculated as a weighted average of recent such
+calculations, giving an indication of system load over a longer period
+than just that used for the latest calculation. However the average is
+strongly biased towards the latest result.
+
+Do not run multiple copies of this program simultaneously -- it will
+cause incorrect results.
+
+------------------------------------------------------------------------
+
+                             Configuration
+
+------------------------------------------------------------------------
+
+There are a number of data blocks in hbutils_rext which can be read and
+modified by the CONFIG program. They are listed here, with a few
+explanations.
+
+        HOT_DATE
+                Default date format string
+        Clock Button
+                Default date format string
+
+        HBUTILS Time & Date
+                Months 1--12
+                Days 0--6
+                AM
+                PM
+                        By altering these, you can configure HOT_DATE
+                        and the clock button to any language you like.
+                        The abbreviated month and day names are always
+                        taken from the ROM.
+        Free Memory Button
+                Default format string
+        Caps Button
+                Caps lock off message
+                Caps lock on message
+        HBUTILS Button Support
+                Button border colour
+                Button paper colour
+                Button ink colour
+                        These allow finer control over the appearance of
+                        buttons than the 'colourways' in the Qpac2
+                        configuration. However, a multicoloured button
+                        frame is unlikely to look anything other than
+                        repulsive.
+                Pause between updates
+                        The buttons created by HBUTILS all do a little
+                        work then go to sleep for a second or so. The
+                        value you enter here determines how long, in
+                        units of 1 frame (50 frames per second on most
+                        Qls, 60 per second in the US.)
+        Memory View Button
+                Default name of Job 0
+                        On the Ql, Job 0 is SuperBASIC and has no
+                        inherent Job name. It is to be hoped that on
+                        systems where Job 0 is not SuperBASIC, it will
+                        include a real Job name but you can configure
+                        the name used by MemView anyway.
+                Colour for system space
+                Colour for free space
+                Colour for Job space
+                Colour for RESPR space
+                        Since system space and RESPR space are at
+                        opposite ends of the memory, it makes sense for
+                        them to share a colour. You can combine colours
+                        to make stipples in the usual single parameter
+                        fashion; remember that
+
+                                ink a,b,c
+
+                        is equivalent to
+
+                                ink a + 8 * (a ^^ b) + 64 * c
+
+                Width for Job name
+                        This is the number of characters extra width in
+                        the MemView window. Hopefully, later versions
+                        will automatically extend their window if they
+                        find an over-long Job name.
+                Pause between updates
+                        MemView has a separate pause between updates
+                        because the time taken is much more obvious; I
+                        find about 1.5 seconds is a good value. Remember
+                        that pressing a key or mouse button in the
+                        MemView window will make it skip straight to the
+                        next Job. The value is given in frames, fifty of
+                        which make one second (slightly different on US
+                        machines...)
+                Maps Jobs with priority 1 or 126
+                        Jobs in the button frame typically have one of
+                        these two priorities (otherwise Button_Pick
+                        misses them.) Since such Jobs typically have
+                        almost no memory allocated to them, it can
+                        sometimes be annoying to have maps appearing for
+                        them.
+        DATAD$ Button
+                Button width
+                        You can set the width of the button. If the
+                        default device is longer then you will only see
+                        the initial part of it though a future release
+                        will probably behave differently since this
+                        isn't the ideal behaviour.
+
+        Load Average Button
+                Load computation resolution
+                        This specifies how many ticks to take
+                        calculating the load. (A tick is about a 50th of
+                        a second.) A high value will give slightly more
+                        accurate results but more than about 100 is a
+                        bit futile.
+                Load computation sensitivity
+                        This specifies the priority to take when
+                        calculating the load. Any jobs running at
+                        similar or lower priority are likely to be
+                        slowed down by the calculation so this should
+                        not be much more than 3 or 4.
+                Number of ticks between calculations
+                        This specifies how long to wait between
+                        successive calculations. A low value will
+                        produce a faster moving graph.
+                Default button width
+                Default button height
+                        These should be self-explanatory.
+
+------------------------------------------------------------------------
+
+                    Copyright Message and the Author
+
+------------------------------------------------------------------------
+
+The HBUTILS programs and this documentation and (c) 1993 Richard
+Kettlewell. You may distribute the program, documentation and source
+freely provided all changes are cleary marked and this message is not
+altered or removed. There is no warranty on HBUTILS, any loss or damage
+cause by its use or misuse is your own problem.
+
+I will probably not be able to support HBUTILS in the future, but if you
+need to get in touch the following addresses are correct as of January
+1995:
+
+        Richard Kettlewell
+        rjk@greenend.org.uk
+
+------------------------------------------------------------------------
+
+RJK 5/1/1995

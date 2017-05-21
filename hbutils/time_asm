@@ -1,0 +1,415 @@
+********************************************************************************
+* Time and Date support                              (c) 1993 Richard Kettlewell
+*
+*        $d                3 characters day from DATE$
+*        $m                3 characters month from DAY$
+*        $D                local full day name
+*        $M                local full month name
+*        $\                1 newline character
+*        $H                AM/PM, length depends on configured names
+*        %y                4 characters year
+*        %d                2 characters day of month
+*        %h                2 characters hour (24hr)
+*        %m                2 characters minute
+*        %s                2 characters second
+*
+*        If an unknown character follows the $ or % then it is inserted without 
+*        the $ or %; the characters % and $ may themselves be inserted in this 
+*        way.
+*
+         include  'string_mac'
+*
+         xdef     ftime
+         xref     brktime
+*
+cv.ildat equ      $ec
+cv.ilday equ      $ee
+*
+         section  text
+*
+* Configuration information
+*
+         dc.b     '<<QCFX>>01'
+         string$  {HBUTILS Time & Date}
+         string$  {1.00}
+*
+         dc.b     0,0                        ; 12 months
+         dc.w     it_m1-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m1-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m2-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m2-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m3-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m3-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m4-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m4-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m5-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m5-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m6-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m6-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m7-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m7-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m8-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m8-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m9-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m9-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m10-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m10-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m11-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m11-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0
+         dc.w     it_m12-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_m12-*
+         dc.w     at_mnth-*
+*
+         dc.b     0,0                        ; 7 days
+         dc.w     it_d0-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d0-*
+         dc.w     at_day-*
+*
+         dc.b     0,0
+         dc.w     it_d1-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d1-*
+         dc.w     at_day-*
+*
+         dc.b     0,0
+         dc.w     it_d2-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d2-*
+         dc.w     at_day-*
+*
+         dc.b     0,0
+         dc.w     it_d3-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d3-*
+         dc.w     at_day-*
+*
+         dc.b     0,0
+         dc.w     it_d4-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d4-*
+         dc.w     at_day-*
+*
+         dc.b     0,0
+         dc.w     it_d5-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d5-*
+         dc.w     at_day-*
+*
+         dc.b     0,0
+         dc.w     it_d6-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_d6-*
+         dc.w     at_day-*
+*
+         dc.b     0,0                         ; Half-day abbreviations
+         dc.w     it_am-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_am-*
+         dc.w     at_half-*
+*
+         dc.b     0,0
+         dc.w     it_pm-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_pm-*
+         dc.w     at_half-*
+         dc.w     -1
+*
+at_half
+at_day
+at_mnth  dc.w     0
+*
+it_am    dc.w     8
+         string$  {AM}
+         ds.b     8
+*
+it_pm    dc.w     8
+         string$  {PM}
+         ds.b     8
+*
+ds_am    string$  {Local equivalents of AM and PM} \
+                  {Abbreviation for morning}
+*
+ds_pm    string$  {Abbreviation for afternoon}
+*
+day      macro    n
+it_d[.day]    dc.w     15
+         dc.w     [.len(n)]
+         dc.b     '[n]'
+         ds.b     16-[.len(n)]
+.day     setnum   1+[.day]
+         endm
+*
+month    macro    n
+it_m[.mnth]    dc.w     15
+         dc.w     [.len(n)]
+         dc.b     '[n]'
+         ds.b     16-[.len(n)]
+.mnth    setnum   1+[.mnth]
+         endm
+*
+.day     setnum   0
+.mnth    setnum   1
+*
+t_day    ds.w     0
+*
+         day      Sunday
+         day      Monday
+         day      Tuesday
+         day      Wednesday
+         day      Thursday
+         day      Friday
+         day      Saturday
+*
+t_month  ds.w     0
+         month    January
+         month    February
+         month    March
+         month    April
+         month    May
+         month    June
+         month    July
+         month    August
+         month    September
+         month    October
+         month    November
+         month    December
+*
+ds_d0    string$  {Days starting with Sunday as day 0} {Day 0}
+ds_d1    string$  {Day 1}
+ds_d2    string$  {Day 2}
+ds_d3    string$  {Day 3}
+ds_d4    string$  {Day 4}
+ds_d5    string$  {Day 5}
+ds_d6    string$  {Day 6}
+ds_m1    string$  {Months starting with January as month 1} {Month 1}
+ds_m2    string$  {Month 2}
+ds_m3    string$  {Month 3}
+ds_m4    string$  {Month 4}
+ds_m5    string$  {Month 5}
+ds_m6    string$  {Month 6}
+ds_m7    string$  {Month 7}
+ds_m8    string$  {Month 8}
+ds_m9    string$  {Month 9}
+ds_m10   string$  {Month 10}
+ds_m11   string$  {Month 11}
+ds_m12   string$  {Month 12}
+*
+*
+* Table of conversions
+* In order to be more portable between English/French &c,
+* as much as possible is read directly from CV.ILDAT and
+* CV.ILDAY. The strings that this is not possible for can
+* be modified by CONFIG.
+*
+* Form is code, start index, end index
+*
+convs    dc.w     '$d',fr_cnday+2,3          ; Day name, short
+         dc.w     '$m',fr_mos,3              ; Month name, short
+         dc.w     '$\',fr_nl,1               ; Newline
+         dc.w     '%y',fr_yrs,4              ; Year
+         dc.w     '%d',fr_das,2              ; Day of month
+         dc.w     '%h',fr_hos,2              ; Hour
+         dc.w     '%m',fr_mis,2              ; Minute
+         dc.w     '%s',fr_ses,2              ; Second 
+         dc.w     0
+*
+fr_month equ      $02
+fr_hour  equ      $06
+fr_day   equ      $0c
+fr_brk   equ      $0e
+fr_cnday equ      $0e
+fr_nl    equ      $13
+fr_cndat equ      $14
+fr_yrs   equ      fr_cndat+2+0
+fr_mos   equ      fr_cndat+2+5
+fr_das   equ      fr_cndat+2+9
+fr_hos   equ      fr_cndat+2+12
+fr_mis   equ      fr_cndat+2+15
+fr_ses   equ      fr_cndat+2+18
+fr_top   equ      $2a
+fr_spare equ      $2a
+frame    equ      $32
+*
+* FTIME --- format time
+*
+* D0                                preserved
+* D1     date
+* D2     length so far in buffer    total length
+* D3                                preserved
+* D4     length of format string    preserved
+* D5-D7                             preserved
+* A0                                preserved
+* A1     buffer pointer             updated
+* A2/A3                             preserved
+* A4     pointer to format string   preserved
+* A5                                preserved
+* A6     base address (maybe)
+*
+ftime    movem.l  d0/d1/d4/a2/a4,-(a7)
+         sub.w    #frame,a7
+         movem.l  d2/a1,fr_spare(a7)
+         movem.l  a6/a7,(a7)
+         move.l   4(a7),a1
+         sub.l    (a7),a1                    ; i.e. a1 = a7-a6
+         add.w    #fr_top,a1                 ; temporary ri stack
+         move.w   cv.ildat,a2                ; push date string
+         jsr      (a2)
+         move.w   cv.ilday,a2                ; push day string
+         jsr      (a2)
+         move.b   #10,fr_nl(a7)              ; fudge in a newline
+         jsr      brktime(pc)                ; push extra info
+         movem.l  fr_spare(a7),d2/a1         ; retrieve buffer registers
+         bra.s    mkd2                       ; start in
+*
+mkd1     move.b   (a4)+,d0                   ; get a character
+         cmp.b    #'%',d0
+         beq.s    special
+         cmp.b    #'$',d0
+         beq.s    special
+*
+insert   move.b   d0,(a1)+                   ; insert character
+         addq.w   #1,d2                      ; count it
+*
+mkd2     dbra     d4,mkd1                    ; go back round
+*
+return   add.w    #frame,a7                  ; clean up
+         movem.l  (a7)+,d0/d1/d4/a2/a4
+         rts
+*
+special  dbra     d4,mkd3                    ; any left?
+         bra.s    return
+*
+mkd3     lsl.w    #8,d0                      ; keep escape character
+         move.b   (a4)+,d0                   ; get second in pair
+         lea      convs(pc),a2               ; table of simple conversions
+*
+mkconv   move.w   (a2)+,d1
+         beq.s    vspecial                   ; end of table
+         cmp.w    d0,d1
+         beq.s    mkfound                    ; correct entry
+         addq.l   #4,a2                      
+         bra      mkconv
+*
+mkfound  movem.w  (a2)+,d0/d1                ; get offset and length
+         lea      0(a7,d0.w),a2              ; start of text
+         bra.s    copystr                    ; copy it in
+*
+vspecial cmp.w    #'$M',d0
+         beq.s    mk_month
+         cmp.w    #'$D',d0
+         beq.s    mk_day
+         cmp.w    #'$H',d0
+         beq.s    mk_ampm
+         cmp.w    #'%M',d0
+         beq.s    mk_nmnth
+         bra      insert                     ; just remove escape
+*
+mk_month move.w   fr_month(a7),d1
+         subq.w   #1,d1                      ; brktime indexes from 1--12
+         lea      t_month+2(pc),a2
+         bra.s    longstr
+*
+mk_day   move.w   fr_day(a7),d1              ; ...but also 0--6
+         lea      t_day+2(pc),a2
+*
+longstr  mulu     #20,d1                     ; length of each entry
+         add.w    d1,a2
+*
+stdstr   move.w   (a2)+,d1                   ; length of string
+*
+copystr  add.w    d1,d2                      ; add it in
+         bra.s    ls2
+*
+ls1      move.b   (a2)+,(a1)+                ; copy it
+*
+ls2      dbra     d1,ls1
+         bra      mkd2                       ; back for another character
+*
+mk_nmnth move.w   fr_month(a7),d0
+         moveq    #' ',d1
+         cmp.b    #10,d0                     ; bigger than 10
+         blo.s    mn1
+         moveq    #'1',d1
+         sub.b    #10,d0
+*
+mn1      move.b   d1,(a1)+
+         add.b    #'0',d0                    ; second digit
+         move.b   d0,(a1)+
+         addq.w   #2,d2                      ; count it up
+         bra      mkd2
+*
+mk_ampm  move.w   fr_hour(a7),d0
+         lea      it_am+2(pc),a2
+         cmp.w    #12,d0
+         blo      stdstr
+         lea      it_pm+2(pc),a2
+         bra      stdstr
+*
+         end

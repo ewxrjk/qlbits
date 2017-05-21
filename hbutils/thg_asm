@@ -1,0 +1,51 @@
+********************************************************************************
+* Thing code for HBUTILS                             (c) 1993 Richard Kettlewell
+*
+         include  'string_mac'
+*
+         xdef     th_ushot,th_frhot
+         xdef     th_usbfr,th_frbfr
+*
+         xref     ut_thjmp
+*
+sms.uthg equ      $28
+sms.fthg equ      $29
+*
+         section  text
+*
+hotkey   string$  {HOTKEY}
+bframe   string$  {Button Frame}
+*
+* Use the 'Button Frame' Thing
+*
+th_usbfr movem.l  a0/d1,-(a7)
+         lea      bframe(pc),a0
+         bra.s    th_use
+*
+* Use the 'HOTKEY' Thing
+* 
+th_ushot movem.l  a0/d1,-(a7)
+         lea      hotkey(pc),a0
+*
+th_use   moveq    #sms.uthg,d0
+*
+th_go    moveq    #-1,d1
+         jsr      ut_thjmp(pc)
+         movem.l  (a7)+,a0/d1
+         rts
+*
+* Free the 'Button Frame' Thing
+*
+th_frbfr movem.l  a0/d1,-(a7)
+         lea      bframe(pc),a0
+         bra.s    th_free
+*
+* Free the 'HOTKEY' Thing
+*
+th_frhot movem.l  a0/d1,-(a7)
+         lea      hotkey(pc),a0
+*
+th_free  moveq    #sms.fthg,d0
+         bra.s    th_go
+*
+         end

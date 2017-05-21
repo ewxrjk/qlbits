@@ -1,0 +1,118 @@
+********************************************************************************
+* Hotkey & button utilities                          (c) 1993 Richard Kettlewell
+*
+         include  'string_mac'
+*
+th_thing equ      $10
+th_use   equ      $14
+th_free  equ      $18
+th_ffree equ      $1c
+th_remov equ      $20
+th_nshar equ      $24
+th_verid equ      $26
+th_name  equ      $2a
+*
+sms.achp equ      $18
+sms.lthg equ      $26
+sms.rthg equ      $27
+ut.wtext equ      $d0
+sb.inipr equ      $110
+*
+         xref     ut_thjmp
+*
+         xref     hot_date
+         xref     capsthg,capsname,capsver
+         xref     clckthg,clckname,clckver
+         xref     freethg,freename,freever
+         xref     memvthg,memvname,memvver
+         xref     datathg,dataname,dataver
+         xref     loadthg,loadname,loadver
+*
+         section  text
+*
+         lea      procs(pc),a1
+         move.w   sb.inipr,a4
+         jsr      (a4)                       ; install procedures
+         lea      things(pc),a4
+*
+insthing tst.w    (a4)                       ; out of Things?
+         beq.s    donethg
+         move.w   (a4)+,d0
+         lea      -2(a4,d0.w),a5             ; name of Thing
+         moveq    #0,d1
+         move.w   (a5)+,d4
+         move.w   d4,d1
+         add.w    #th_name+3,d1              ; space required
+         moveq    #sms.achp,d0
+         moveq    #-1,d2                     ; owned by this Job
+         trap     #1                         ; allocate space (set to zero)
+         tst.l    d0
+         bne.s    donethg                    ; aargh!
+         move.l   a0,a3
+         lea      th_name(a3),a0
+         move.w   d4,(a0)+
+         bra.s    is2
+*
+is1      move.b   (a5)+,(a0)+                ; copy Thing name
+*
+is2      dbra     d4,is1
+         move.w   (a4)+,d0
+         lea      -2(a4,d0.w),a5             ; address of Thing
+         move.l   a5,th_thing(a3)
+         move.w   (a4)+,d0                   ; address of version
+         move.l   -2(a4,d0.w),th_verid(a3)
+         clr.l    th_use(a3)                 ; zeroize other fields
+         clr.l    th_free(a3)
+         clr.l    th_ffree(a3)
+         clr.l    th_remov(a3)
+         clr.w    th_nshar(a3)
+         moveq    #sms.rthg,d0
+         lea      th_name(a3),a0
+         jsr      ut_thjmp(pc)               ; remove old copy of Thing
+         moveq    #sms.lthg,d0
+         move.l   a3,a1
+         jsr      ut_thjmp(pc)               ; link new version in
+         bra      insthing                   ; look for another Thing
+*
+donethg  sub.l    a0,a0                      ; channel 0
+         lea      msg(pc),a1
+         move.w   ut.wtext,a4
+         jmp      (a4)                       ; report installation
+*
+msg      string$  {Hotkey & button utilities release 1.2a} {(c) 1993,94 Richard Kettlewell} {}
+*
+things   dc.w     capsname-*
+         dc.w     capsthg-*
+         dc.w     capsver+2-*
+*
+         dc.w     clckname-*
+         dc.w     clckthg-*
+         dc.w     clckver+2-*
+*
+         dc.w     freename-*
+         dc.w     freethg-*
+         dc.w     freever+2-*
+*
+         dc.w     memvname-*
+         dc.w     memvthg-*
+         dc.w     memvver+2-*
+*
+         dc.w     dataname-*
+         dc.w     datathg-*
+         dc.w     dataver+2-*
+*
+         dc.w     loadname-*
+         dc.w     loadthg-*
+         dc.w     loadver+2-*
+*
+         dc.w     0
+*
+procs    dc.w     0
+         dc.w     0
+         dc.w     1
+         dc.w     hot_date-*
+         dc.b     8,'HOT_DATE'
+         dc.w     0
+*
+         end
+

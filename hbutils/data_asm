@@ -1,0 +1,124 @@
+********************************************************************************
+* DATAD$ button                                      (c) 1994 Richard Kettlewell
+*
+         include  'string_mac'
+*
+         xdef     datathg,dataname,dataver
+*
+         xref     getbutn,butnwait,getpos
+*
+sms.info equ      $00
+sys_datd equ      $b0
+iob.smul equ      $07
+iow.spix equ      $17
+iow.clrr equ      $24
+forever  equ      -1
+*
+         section  text
+*
+datathg  dc.l     'THG%'
+         dc.l     1
+         dc.l     datahead-datathg
+         dc.l     datahend-datahead
+         dc.l     256
+         dc.l     datacode-datathg
+*
+datahead ds.b     6
+         dc.w     $4afb
+         string$  {DATAD$}
+*
+datahend ds.w     0
+*
+datacode add.l    a4,a6
+         st       (a6)
+         moveq    #sms.info,d0
+         trap     #1
+         move.l   a0,a5
+         move.w   (a7),d0
+         lsl.w    #2,d0
+         lea      2(a7,d0.w),a0
+         jsr      getpos(pc)
+         move.w   width(pc),d2
+         mulu     #6,d2
+         addq.w   #8,d2
+         swap     d2
+         move.w   #12+2,d2
+         jsr      getbutn(pc)
+*
+* The main loop
+* Start by deciding whether the device name has changed at all 
+*
+loop     trap     #0
+         move.l   sys_datd(a5),a3
+         move.l   a6,a4
+         move.w   (a3)+,d3
+         move.w   (a4)+,d4
+         cmp.w    d3,d4
+         bne.s    changed
+         bra.s    cmp2
+*
+cmp1     move.b   (a3)+,d0
+         cmp.b    (a4)+,d0
+         bne.s    changed
+*
+cmp2     dbra     d3,cmp1
+         moveq    #0,d0
+         bra.s    ready
+*
+changed  move.l   sys_datd(a5),a3
+         move.l   a6,a4
+         move.w   (a3),d3
+         addq.w   #1,d3
+         lsr.w    #1,d3
+*
+copy     move.w   (a3)+,(a4)+
+         dbra     d3,copy
+         moveq    #-1,d0
+*
+ready    and.w    #$dfff,sr
+         tst.l    d0
+         beq.s    sleep
+         moveq    #iow.spix,d0
+         moveq    #2,d1
+         moveq    #1,d2
+         moveq    #forever,d3
+         trap     #3
+         moveq    #iob.smul,d0
+         move.l   a6,a1
+         move.w   (a1)+,d2
+         cmp.w    width(pc),d2
+         bls.s    lengthok
+         move.w   width(pc),d2
+*
+lengthok trap     #3
+         moveq    #iow.clrr,d0
+         trap     #3
+*
+sleep    moveq    #forever,d3
+         jsr      butnwait(pc)
+         bra      loop
+*
+         dc.w     '<<QCFX>>'
+         dc.w     '01'
+*
+dataname string$  {DATAD$ button}
+*
+dataver  string$  {1.00}
+*
+         dc.b     10,0
+         dc.w     width-*
+         dc.w     0,0
+         dc.w     dwidth-*
+         dc.w     awidth-*
+*
+         dc.w     -1
+*
+width    dc.w     22
+*
+dwidth   string$  {Width of button in characters} \
+                  {}
+*
+awidth   dc.w     0,40
+*
+         end
+         

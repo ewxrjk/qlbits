@@ -1,0 +1,177 @@
+********************************************************************************
+* Free memory button				     (c) 1993 Richard Kettlewell
+*
+* 20/7/1994 rjk Minimal support for 1.10 button code
+*
+	 include  'string_mac'
+*
+*
+	 xdef	  freethg,freename,freever
+*
+	 xref	  getbutn,butnwait,ftime,getpos
+*
+sms.info equ	  $00
+sms.frtp equ	  $06
+iob.smul equ	  $07
+iow.spix equ	  $17
+iow.clrr equ	  $24
+forever  equ	  -1
+sys_ramt equ	  $20
+*
+	 section  text
+*
+* Start of Thing:
+*
+freethg  dc.l	  'THG%'
+	 dc.l	  1
+	 dc.l	  freehead-freethg
+	 dc.l	  freehend-freehead
+	 dc.l	  192
+	 dc.l	  freecode-freethg
+*
+* Start of Job:
+*
+freehead ds.b	  6
+	 dc.w	  $4afb
+	 string$  {Free}
+*
+freehend ds.w	  0
+*
+freecode moveq	  #10,d6		     ; base
+	 lea	  8(a6,a4.l),a6 	     ; workspace
+	 clr.l	  -4(a6)		     ; pretend 0 free memory
+	 move.w   (a7)+,d0
+	 lsl.w	  #2,d0
+	 add.w	  d0,a7 		     ; dump channels
+	 move.l   a7,a4
+	 move.l   a7,a0
+	 jsr	  getpos(pc)
+	 move.l   d1,-(a7)
+	 move.w   (a4)+,d4		     ; command line
+	 bne.s	  gotstr
+	 lea	  defstr(pc),a4 	     ; use configured default
+	 move.w   (a4)+,d4
+*
+gotstr	 moveq	  #sms.info,d0
+	 trap	  #1
+	 move.l   sys_ramt(a0),d1
+	 sub.l	  a0,d1 		     ; largest free memory
+	 bsr.s	  mkstr
+	 mulu	  #6,d2 		     ; width of 1 character
+	 addq.w   #8,d2 		     ; width of window
+	 swap	  d2
+	 move.w   #14,d2		     ; height of window
+	 move.l   (a7)+,d1
+	 jsr	  getbutn(pc)
+	 move.l   a0,-8(a6)		     ; preserve ID
+*
+loop	 moveq	  #sms.frtp,d0
+	 trap	  #1			     ; find free memory
+	 move.l   -8(a6),a0
+	 cmp.l	  -4(a6),d1		     ; changed?
+	 beq.s	  wait			     ; if so, wait a bit
+	 move.l   d1,-4(a6)
+	 bsr.s	  mkstr 		     ; compile string
+	 move.w   d2,d5
+	 moveq	  #iow.spix,d0
+	 moveq	  #2,d1
+	 moveq	  #1,d2
+	 moveq	  #forever,d3
+	 trap	  #3			     ; position cursor
+	 moveq	  #iob.smul,d0
+	 move.w   d5,d2
+	 move.l   a6,a1
+	 trap	  #3			     ; report free memory
+	 moveq	  #iow.clrr,d0
+	 trap	  #3			     ; tidy window
+*
+wait
+***	    jsr      butnwait(pc)		; wait a bit
+	 moveq	  #8,d0 		suspend job
+	 moveq	  #-1,d1		me
+	 move.w   #50,d3		1 second
+	 suba.l   a1,a1 		no flag
+	 trap	  #1
+	 bra	  loop			     ; do it all again
+*
+* Turn a number and a format into a string
+*
+mkstr	 move.w   d4,d5
+	 move.l   a4,a5
+	 move.l   a6,a2
+	 moveq	  #0,d2
+	 bra.s	  mk2
+*
+mk1	 move.b   (a5)+,d0
+	 cmp.b	  #'%',d0
+	 beq.s	  mkspec
+*
+mk5	 move.b   d0,(a2)+
+	 addq.w   #1,d2
+*
+mk2	 dbra	  d5,mk1
+*
+mk4	 rts
+*
+mkspec	 dbra	  d5,mk3
+	 rts
+*
+mk3	 move.l   d1,d7
+	 move.b   (a5)+,d0
+	 cmp.b	  #'b',d0
+	 beq.s	  insnum
+	 lsr.l	  d6,d7
+	 cmp.b	  #'k',d0
+	 bne	  mk5
+*
+insnum	 moveq	  #0,d3
+	 move.l   a7,a3
+*
+ins0	 move.w   d7,d0
+	 clr.w	  d7
+	 swap	  d7
+	 divu	  d6,d7
+	 swap	  d0
+	 swap	  d7
+	 move.w   d7,d0
+	 swap	  d0
+	 divu	  d6,d0
+	 move.w   d0,d7
+	 swap	  d0
+	 add.b	  #'0',d0
+	 move.b   d0,-(a3)
+	 addq.w   #1,d3
+	 tst.l	  d7
+	 bne	  ins0
+	 add.w	  d3,d2
+	 subq.w   #1,d3
+*
+ins1	 move.b   (a3)+,(a2)+
+	 dbra	  d3,ins1
+	 bra	  mk2
+*
+* Configuration
+*
+	 dc.w	  '<<QCFX>>01'
+*
+freename string$  {Free Memory Button}
+*
+freever  string$  {1.01}
+	 ds.w	  0
+*
+	 dc.b	  0,'D'
+	 dc.w	  defstr-2-*
+	 dc.w	  0,0
+	 dc.w	  ddefstr-*
+	 dc.w	  adefstr-*
+*
+	 dc.w	  -1
+*
+	 dc.w	  62
+defstr	 string$  {%kK}
+	 ds.b	  64-(*-defstr)
+*
+ddefstr  string$  {Default format string}
+adefstr  dc.w	  1
+*
+	 end

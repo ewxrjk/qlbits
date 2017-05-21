@@ -1,0 +1,270 @@
+********************************************************************************
+* Load Average Button				     (c) 1994 Richard Kettlewell
+*
+* Draws a graph measuring the average system load.
+*
+	 include  'string_mac'
+*
+	 section  text
+*
+	 xref	  getpos,getnum,getbutn,butnwait,zap,skipspc,icolr
+	 xdef	  loadthg,loadname,loadver
+*
+sms.ssjb equ	  $08
+sms.spjb equ	  $0b
+sms.achp equ	  $18
+sms.lpol equ	  $1c
+sms.rpol equ	  $1d
+iow.pixq equ	  $0a
+iow.pana equ	  $1b
+iow.blok equ	  $2e
+hp_drivr equ	  $04
+hp.headr equ	  $10
+hp_close equ	  $0c
+mem.rchp equ	  $c2
+forever  equ	  -1
+*
+d_chid	 equ	  $00		    ; screen channel ID
+d_xpos	 equ	  $04		    ; width - 1
+d_height equ	  $06		    ; height
+d_timer  equ	  $08		    ; address of timer
+d_close  equ	  $0c		    ; address of close routine
+d_lptr	 equ	  $10		    ; pointer into array
+d_loads  equ	  $12		    ; array of load values
+*
+* Interrupt task
+*
+task	 addq.l   #1,16(a3)	    ; that was hard...
+	 rts
+*
+close	 add.w	  #hp.headr,a0	    ; find linkage
+	 moveq	  #sms.rpol,d0	    ; unlink it
+	 trap	  #1
+	 add.w	  #-hp.headr,a0
+	 movem.l  a3/a6,-(a7)	    ; save registes as per Merz manual
+	 move.w   mem.rchp,a2
+	 jsr	  (a2)		    ; release the memory
+	 movem.l  (a7)+,a3/a6
+	 moveq	  #0,d0
+	 rts
+*
+* Start of Thing:
+*
+loadthg  dc.l	  'THG%'
+	 dc.l	  1
+	 dc.l	  loadhead-loadthg
+	 dc.l	  loadhend-loadhead
+	 dc.l	  256
+	 dc.l	  loadcode-loadthg
+*
+* Start of Job:
+*
+loadhead ds.b	  6
+	 dc.w	  $4afb
+	 string$  {LoadAve}
+*
+loadhend ds.w	  0
+*
+loadcode add.l	  a4,a6 	    ; find some workspace
+	 move.l   a6,a0
+*
+clear	 cmp.l	  a7,a0 	    ; everything had better be even!
+	 bhs.s	  cleared
+	 clr.w	  (a0)+ 	    ; zero out workspace
+	 bra	  clear
+*
+cleared  move.w   (a7),d0
+	 lsl.w	  #2,d0
+	 lea	  2(a7,d0.w),a0     ; find command line
+	 jsr	  getpos(pc)	    ; extract position parameters
+	 move.l   d1,d7
+	 move.w   (a0),d2	    ; length of string
+	 moveq	  #0,d0 	    ; start of string
+	 jsr	  skipspc(pc)	    ; skip leading space
+	 jsr	  getnum(pc)	    ; look for a width
+	 bne.s	  default
+	 swap	  d1
+	 jsr	  skipspc(pc)	    ; look for a height
+	 jsr	  getnum(pc)
+	 beq.s	  gotsize
+*
+default  move.l   defsize(pc),d1    ; use default size
+*
+gotsize  move.l   d1,d2
+	 move.l   d7,d1
+	 jsr	  getbutn(pc)	    ; open a window (and set priority)
+	 move.l   a0,d_chid(a6)
+	 moveq	  #iow.pixq,d0
+	 moveq	  #forever,d3
+	 lea	  d_xpos(a6),a1
+	 trap	  #3		    ; find actual available size
+	 subq.w   #1,d_xpos(a6)     ; x position for bar
+	 moveq	  #sms.achp,d0
+	 moveq	  #12,d1
+	 moveq	  #-1,d2
+	 trap	  #1		    ; allocate space for link
+	 tst.l	  d0
+	 bne	  quit
+	 lea	  task(pc),a1
+	 move.l   a1,4(a0)	    ; set polled routine address
+	 lea	  8(a0),a1
+	 move.l   a1,d_timer(a6)    ; set timer address
+	 lea	  close(pc),a1
+	 move.l   a1,d_close(a6)    ; set close routine
+	 move.l   a6,hp_drivr-hp.headr(a0) ; set driver address
+	 moveq	  #sms.lpol,d0
+	 trap	  #1		    ; start the task
+*
+* We're ready to go
+*
+	 moveq	  #sms.spjb,d0
+	 moveq	  #-1,d1
+	 move.w   sens(pc),d2
+	 trap	  #1
+loop
+	 move.l   d_timer(a6),a0    ; find timer address
+	 clr.l	  (a0)		    ; zeroise timer
+	 moveq	  #0,d0 	    ; how many changes noticed?
+	 moveq	  #0,d1 	    ; last value seen
+	 move.l   resn(pc),d4
+*
+loadcomp move.l   (a0),d2	    ; get current timer value
+	 cmp.l	  d1,d2 	    ; has it changed?
+	 sne	  d3
+	 add.b	  d3,d0
+	 move.l   d2,d1 	    ; record the value
+	 cmp.l	  d4,d2 	    ; have we reached 100 yet?
+	 blo.s	  loadcomp	    ; if not, repeat the loop
+	 ext.w	  d0
+	 add.w	  d0,d4 	    ; find %cpu that we got
+	 move.w   d_lptr(a6),d0
+	 move.w   #16,d5
+	 move.w   d4,d_loads(a6,d0.w) ; store value
+	 addq.w   #2,d0 	    ; move pointer along
+	 cmp.w	  d5,d0
+	 blo.s	  nowrap
+	 moveq	  #0,d0
+*
+nowrap	 move.w   d0,d_lptr(a6)     ; remember pointer
+	 lea	  weight(pc),a0
+	 moveq	  #7,d1 	    ; 8 loads to add up
+	 moveq	  #0,d4 	    ; sum is zero
+	 moveq	  #0,d2
+*
+avecomp  move.w   d_loads(a6,d0.w),d3 ; get the load computed
+	 move.w   (a0)+,d6
+	 cmpi.w   #1,d6 	    cmp + bra.s is faster than mulu by 1
+	 beq.s	  no_mult
+	 mulu	  d6,d3 	    ; weight it
+no_mult
+	 add.w	  d6,d2
+	 add.w	  d3,d4 	    ; add it to the sum
+	 addq.w   #2,d0 	    ; next load value
+	 cmp.w	  d5,d0
+	 blo.s	  nowrap1
+	 moveq	  #0,d0
+*
+nowrap1  dbra	  d1,avecomp
+	 mulu	  d_height(a6),d4
+	 move.l   resn(pc),d5
+	 mulu	  d2,d5 	    ; sum of weights
+	 divu	  d5,d4 	    ; scale block for window
+	 moveq	  #iow.pana,d0
+	 moveq	  #-1,d1
+	 moveq	  #forever,d3
+	 move.l   d_chid(a6),a0
+	 trap	  #3		    ; pan window
+	 tst.l	  d0
+	 bmi.s	  quit
+	 move.w   d_height(a6),d0   ; window height
+	 sub.w	  d4,d0 	    ;		  -block height
+	 move.w   d0,-(a7)	    ;			      =block y position
+	 move.w   d_xpos(a6),-(a7)  ; block x position
+	 move.w   d4,-(a7)	    ; block height
+	 move.w   #1,-(a7)	    ; block width
+	 moveq	  #iow.blok,d0
+	 move.w   icolr(pc),d1
+	 move.l   a7,a1
+	 trap	  #3		    ; draw the block
+	 tst.l	  d0
+	 bmi.s	  quit
+	 addq.l   #8,a7 	    ; free stack
+	 moveq	  #sms.ssjb,d0
+	 moveq	  #-1,d1
+	 move.w   gap(pc),d3
+	 sub.l	  a1,a1
+	 trap	  #1		    ; wait a bit before computing again
+	 tst.l	  d0
+	 bpl	  loop
+*
+quit	 jmp	  zap(pc)
+*
+weight
+	 dc.w	  1,1,1,1,1,2,4,16
+*
+* Configuration table
+*
+	 dc.w	  '<<QCFX>>'
+	 dc.w	  '01'
+*
+loadname string$  {Load Average Button}
+*
+loadver  string$  {1.00}
+*
+	 dc.b	  12,0
+	 dc.w	  resn-*
+	 dc.w	  0,0
+	 dc.w	  resn.d-*
+	 dc.w	  resn.a-*
+*
+	 dc.b	  10,0
+	 dc.w	  sens-*
+	 dc.w	  0,0
+	 dc.w	  sens.d-*
+	 dc.w	  sens.a-*
+*
+	 dc.b	  10,0
+	 dc.w	  gap-*
+	 dc.w	  0,0
+	 dc.w	  gap.d-*
+	 dc.w	  gap.a-*
+*
+	 dc.b	  10,0
+	 dc.w	  defsize-*
+	 dc.w	  0,0
+	 dc.w	  dw.d-*
+	 dc.w	  dw.a-*
+*
+	 dc.b	  10,0
+	 dc.w	  defhgt-*
+	 dc.w	  0,0
+	 dc.w	  dh.d-*
+	 dc.w	  dh.a-*
+*
+	 dc.w	  -1
+*
+gap.d	 string$  {Number of ticks between calculations} \
+		  {(50 ticks makes 1 second)} {}
+*
+resn.d	 string$  {Load computation resolution 25--255} \
+		  {Too big is futile} {}
+*
+sens.d	 string$  {Load computation sensitivity 1--127} \
+		  {Too big and your computer slows down!} {} 
+*
+dw.d	 string$  {Default button width} {}
+*
+dh.d	 string$  {Default button height} {}
+*
+resn	 dc.l	  50
+sens	 dc.w	  4
+gap	 dc.w	  100
+defsize  dc.w	  64
+defhgt	 dc.w	  42
+resn.a	 dc.l	  25,255
+sens.a	 dc.w	  1,127
+gap.a	 dc.w	  1,500
+dw.a	 dc.w	  24,256
+dh.a	 dc.w	  14,256
+*
+	 end

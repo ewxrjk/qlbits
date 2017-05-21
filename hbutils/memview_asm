@@ -1,0 +1,566 @@
+********************************************************************************
+* Memory Viewer                                      (c) 1993 Richard Kettlewell
+*
+* 20/7/1994 rjk Minimal support for 1.10 button code
+*
+         include  'string_mac'
+         include  'qdos_pt'
+*
+*
+         xdef     memvthg,memvname,memvver
+*
+         xref     getbutn,butnwait,zap,getpos
+*
+err.bp   equ      -15
+*
+sms.info equ      $00
+sms.injb equ      $02
+sms.ssjb equ      $08
+*
+iob.smul equ      $07
+iow.spix equ      $17
+iow.clrr equ      $24
+iop.wspt equ      $76
+iop.pick equ      $7c
+forever  equ      -1
+*
+sys_chpb equ      $04
+sys_fsbb equ      $0c
+sys_sbab equ      $10
+sys_tpab equ      $14
+sys_rpab equ      $1c
+sys_ramt equ      $20
+sys_jbtp equ      $62
+sys_jbtb equ      $68
+*
+hp_len   equ      $00
+hp_drivr equ      $04
+hp_next  equ      $04
+hp_owner equ      $08
+hp_rflag equ      $0c
+*
+jb_tag   equ      $10
+*
+wsi.avbl equ      $00
+*
+m_myjb   equ      $00
+m_base   equ      $04
+m_max    equ      $08
+m_shr    equ      $0a
+m_zot    equ      $0b
+m_round  equ      $0c
+m_job    equ      $10
+m_chan   equ      $14
+m_sprite equ      $18
+m_colr   equ      $18+pto.hdrl
+m.size   equ      $18+pto.hdrl+64*8
+*
+         section  text
+*
+memvthg  dc.l     'THG%'
+         dc.l     1
+         dc.l     memvhead-memvthg
+         dc.l     memvhend-memvhead
+         dc.l     256+m.size
+         dc.l     memvcode-memvthg
+*
+memvhead ds.b     6
+         dc.w     $4afb
+         string$  {MemView}
+*
+memvhend ds.w     0
+*
+memvcode add.l    a4,a6           
+         moveq    #sms.info,d0
+         trap     #1
+         movem.l  d1/a0,m_myjb(a6)
+         move.l   sys_ramt(a0),d1
+         sub.l    a0,d1    
+         moveq    #err.bp,d0
+         move.l   #1<<24,d3
+         cmp.l    d3,d1
+         bhi      zap      
+         moveq    #24-11,d2
+*
+fmsize   cmp.l    d3,d1
+         bhi.s    nearsize
+         beq.s    gotsize
+         lsr.l    #1,d3
+         subq.w   #1,d2
+         bra      fmsize
+*
+nearsize addq.w   #1,d2
+         add.l    d3,d3
+*
+gotsize  move.b   d2,m_shr(a6)
+         moveq    #11,d4
+         lsr.l    d4,d3
+         subq.l   #1,d3
+         move.l   d3,m_round(a6)
+         add.b    #3,d2
+         lsr.l    d2,d1
+         add.w    #8,d1
+         move.w   d1,m_max(a6)
+         move.l   #$01000000,m_sprite+pto_form(a6)
+         move.l   #$01000008,m_sprite+pto_size(a6)
+         clr.l    m_sprite+pto_org(a6)
+         move.l   #m_colr-(m_sprite+pto_cpat),m_sprite+pto_cpat(a6)
+         lea      mask-(m_sprite+pto_mask)(pc),a0
+         sub.l    a6,a0
+         move.l   a0,m_sprite+pto_mask(a6)
+         clr.l    m_sprite+pto_nobj(a6)
+         move.w   xwidth(pc),d2
+         mulu     #6,d2
+         add.w    #256+6+8,d2
+         swap     d2
+         move.w   #14,d2
+         move.w   (a7),d1
+         lsl.w    #2,d1
+         lea      2(a7,d1.w),a0
+         jsr      getpos(pc)
+         jsr      getbutn(pc)
+         move.l   a0,m_chan(a6)
+*
+restart  clr.l    m_job(a6)
+*
+loop     sf       m_zot(a6)
+         moveq    #sms.injb,d0               ; info on this job please
+         move.l   m_job(a6),d1               ; current one
+         move.l   d1,d7                      ; save it for later
+         moveq    #0,d2                      ; top of tree
+         trap     #1
+         tst.l    d0
+         bne      restart                    ; if problem, just start over
+         move.l   d1,m_job(a6)               ; store next job id
+         move.b   infob(pc),d0
+         bne.s    info_all
+         cmp.b    #126,d3
+         beq      loop
+         cmp.b    #1,d3
+         beq      loop
+*
+info_all move.l   a0,a3                      ; save address of job
+         lea      8(a3),a1
+         cmp.w    #$4afb,6(a3)               ; is it standard?
+         beq.s    gotname
+         sub.l    a1,a1
+         tst.l    d7                         ; if not, is it job 0?
+         bne.s    gotname
+         lea      sbasic(pc),a1              ; default name for job 0
+*
+gotname  move.l   a1,-(a7)
+         lea      m_colr(a6),a0              ; erase sprite colours
+         moveq    #0,d0
+         moveq    #64*8/4-1,d1
+*
+clrcolr  move.l   d0,(a0)+
+         dbra     d1,clrcolr
+         trap     #0                         ; DON'T GET INTERRUPTED!
+         tst.b    m_zot(a6)
+         bne.s    mapzot
+         move.l   m_base(a6),a0              ; system variables
+         move.l   a0,a1                      ; start of tables
+         move.l   sys_chpb(a0),d1
+         sub.l    a1,d1                      ; length of tables
+         move.l   syscolr(pc),d2             ; system space
+         bsr      fill_in                    ; fill it in
+         lea      sys_chpb(a0),a1            ; map the common heap
+         bsr      map_heap
+         tst.b    m_zot(a6)
+         bne.s    mapzot
+         move.l   sys_fsbb(a0),a1             ; base of free area
+         move.l   sys_sbab(a0),d1
+         sub.l    a1,d1                      ; length of free area
+         move.l   freecolr(pc),d2            ; free space
+         bsr      fill_in                    ; fill it in
+         tst.l    d7
+         bne.s    ord_job
+         move.l   sys_sbab(a0),a1            ; start of basic
+         move.l   sys_tpab(a0),d1
+         sub.l    a1,d1                      ; length of basic
+         bra.s    mytpa
+*
+ord_job  lsl.w    #2,d7
+         move.l   sys_jbtb(a0),a1
+         move.l   0(a1,d7.w),a1              ; address of job d7
+         move.l   (a1),d1                    ; length of space
+*
+mytpa    move.l   mycolr(pc),d2              ; my space
+         bsr      fill_in                    ; fill it in
+         moveq    #-1,d7                     ; no job
+         lea      sys_tpab(a0),a1            ; map the tpa
+         bsr      map_heap                   ; (at least, the free bits)
+         tst.b    m_zot(a6)
+         bne.s    mapzot
+         move.l   sys_rpab(a0),a1            ; base of rpa
+         move.l   sys_ramt(a0),d1
+         sub.l    a1,d1                      ; length of rpa
+         move.l   rescolr(pc),d2             ; rpa space
+         bsr      fill_in                    ; fill it in
+*
+mapzot   and.w    #$dfff,sr                  ; Back to user mode
+         tst.b    m_zot(a6)
+         beq.s    mapok
+         addq.l   #4,a7
+         moveq    #iop.pick,d0
+         move.l   m_myjb(a6),d1
+         moveq    #0,d2
+         moveq    #forever,d3
+         move.l   m_chan(a6),a0
+         trap     #3
+         moveq    #iow.spix,d0
+         moveq    #2,d1
+         moveq    #1,d2
+         trap     #3
+         lea      aargh(pc),a1
+         moveq    #iob.smul,d0
+         move.w   (a1)+,d2
+         trap     #3
+         moveq    #iow.clrr,d0
+         trap     #3
+         moveq    #sms.ssjb,d0
+         moveq    #-1,d1
+         moveq    #-1,d3                     ; wait for explicit release
+         sub.l    a1,a1
+         trap     #1
+         bra.s    wait
+*
+mapok    moveq    #iop.wspt,d0               ; write sprite
+         move.l   #$00020002,d1              ; position
+         lea      m_sprite(a6),a1
+         moveq    #forever,d3
+         move.l   m_chan(a6),a0
+         trap     #3
+         moveq    #iow.spix,d0
+         move.w   m_max(a6),d1
+         moveq    #1,d2
+         trap     #3
+         move.l   (a7)+,d0
+         beq.s    clearit
+         move.l   d0,a1
+         lea      sbasic(pc),a2
+         cmp.l    a1,a2
+         beq.s    printit
+         cmp.w    #$4afb,-2(a1)
+         bne.s    clearit
+*
+printit  move.l   a1,-(a7)
+         subq.l   #8,a7
+         move.l   a7,a1
+         moveq    #$a,d0
+         trap     #3
+         moveq    #0,d1
+         move.w   (a7),d1
+         sub.w    4(a7),d1
+         divu     #6,d1
+         addq.l   #8,a7
+         move.l   (a7)+,a1
+         move.w   (a1)+,d2
+         beq.s    clearit
+         cmp.w    d1,d2
+         bls.s    notrunc
+         move.w   d1,d2
+*
+notrunc  moveq    #iob.smul,d0
+         trap     #3
+*
+clearit  moveq    #iow.clrr,d0
+         trap     #3
+*
+wait     move.w   pause(pc),d3
+         jsr      butnwait(pc)               ; wait a bit
+         bra      loop                       ; next Job
+*
+* MAP_HEAP --- map a heap
+*
+* D0-D6                             ???
+* D7     Job id                     preserved
+* A0     system variables           preserved
+* A1     heap free pointer          ???
+* A2-A5                             ???
+* A6     variables                  preserved
+*
+map_heap move.l   8(a1),a3
+         bsr.s    map_ffre
+         move.l   (a1),a1
+*
+map_loop cmp.l    a3,a1                      ; start of free area
+         beq.s    map_done
+         bhi.s    zotted                     ; if pointer > end, zot
+         cmp.l    a2,a1                      ; free block
+         beq.s    map_free
+         bhi.s    zotted                     ; if pointer > free, zot
+         move.l   hp_len(a1),d1
+         beq.s    zotted                     ; zero length is illegal!
+         and.b    #15,d1
+         bne.s    zotted                     ; length should be a multiple of 16
+         cmp.l    hp_owner(a1),d7            ; this Job
+         bne.s    map_chek
+         move.l   hp_len(a1),d1
+         move.l   mycolr(pc),d2
+         bsr.s    fill_in                    ; fill in a bit
+         bra.s    map_next
+*
+map_chek move.l   hp_owner(a1),d1            ; find owner of space
+         move.w   d1,d2                      ; job number
+         cmp.w    sys_jbtp(a0),d2            ; in range?
+         bhi.s    zotted                     ; oops...
+         lsl.w    #2,d2
+         move.l   sys_jbtb(a0),a4
+         move.l   0(a4,d2.w),d2              ; get pointer
+         ble.s    zotted                     ; oops...
+         swap     d1
+         move.l   d2,a4
+         cmp.w    jb_tag(a4),d1              ; tag consistent?
+         bne.s    zotted                     ; oops...
+*
+map_next add.l    hp_len(a1),a1              ; step over
+         bra      map_loop
+*
+map_free move.l   hp_len(a1),d1
+         move.l   freecolr(pc),d2
+         bsr.s    fill_in
+         bsr.s    map_ffree
+         bra.s    map_next
+*
+map_done rts
+*
+map_ffre move.l   4(a1),d0
+         beq.s    map_efre
+         lea      0(a1,d0.l),a2
+         cmp.l    a3,a2
+         blo.s    return                     ; if free < end, ok
+         addq.l   #4,a7                      ; else zot down
+*
+zotted   st       m_zot(a6)
+*
+return   rts
+*
+map_efre move.l   a3,a2                      ; safe value!
+         rts
+*
+* FILL_IN --- do part of a map
+*
+* D0                                ???
+* D1     length                     ???
+* D2     colour mask                ???
+* D3-D6                             ???
+* D7                                preserved
+* A0     system variables           preserved
+* A1     address                    preserved
+* A2/A3                             preserved
+* A4/A5                             ???
+* A6     variables                  preserved
+*
+* This is the 'dim' version which does each pixel separately...
+* It seems to be quick enough on my machine...
+*
+fill_in  tst.l    d1
+         bmi      zotted
+         tst.b    m_zot(a6)
+         bne      return
+         move.l   a1,d3
+         move.b   m_shr(a6),d0
+         sub.l    m_base(a6),d3
+         lsr.l    d0,d3                      ; start pixel number
+         add.l    m_round(a6),d1
+         lsr.l    d0,d1                      ; # of pixels
+         beq.s    fill_ret                   ; if no pixels, forget it
+*
+         move.l   d2,d0
+         btst     #0,d3                      ; odd pixel number?
+         beq.s    fill_lp
+         swap     d0                         ; use other half of colour mask
+*
+fill_lp  moveq    #63,d4                     ; row 0 AND pixel 0 of a word
+         and.w    d3,d4                      ; suitable for block?
+         bne.s    onepix                     ; if not, just do 1 pixel
+         cmp.w    #64,d1                     ; enough pixels left?
+         blo.s    onepix                     ; if not, just do 1 pixel
+         swap     d0                         ; even though we're even...
+         move.w   d3,d4
+         lsr.w    #6,d4                      ; find word number
+         add.w    d4,d4                      ; find offset of word
+         lea      m_colr(a6,d4.w),a4         ; find address at top of block
+         moveq    #3,d4                      ; number of 2-rows
+         move.w   #64,d5
+*
+blkloop  move.w   d2,(a4)                    ; do the work
+         add.w    d5,a4
+         move.w   d0,(a4)
+         add.w    d5,a4
+         dbra     d4,blkloop
+         swap     d0                         ; restore expected value
+         add.w    #64,d3                     ; move over them
+         sub.w    #64,d1                     ; just did 64 pixels
+         bne      fill_lp
+         rts
+*
+onepix   and.w    #7,d4
+         lsl.w    #6,d4                      ; multiply by bytes-per-row
+         lea      m_colr(a6,d4.w),a4         ; find start of row
+         move.w   d3,d4
+         lsr.w    #3,d4                      ; find pixel number across row
+         move.w   d4,d5
+         and.w    #7,d4                      ; find pixel number in word
+         lsr.w    #3,d5                      ; find word number
+         add.w    d5,d5                      ; find offset of word
+         add.w    d5,a4                      ; find address of word
+         move.w   #$7f7f,d5                  ; mask out existing data
+         ror.w    d4,d5
+         and.w    (a4),d5                    ; do it
+         move.w   #$8080,d6                  ; mask off irrelevant data
+         ror.w    d4,d6
+         and.w    d0,d6                      ; do it
+         or.w     d5,d6                      ; combine the two
+         move.w   d6,(a4)                    ; put it back in the sprite
+         swap     d0                         ; other half of colour
+         addq.w   #1,d3                      ; next pixel
+         subq.w   #1,d1                      ; 1 less pixel to go
+         bne      fill_lp
+*
+fill_ret rts
+*
+aargh    string$  {*** memory corrupted ***}
+*
+         dc.w     '<<QCFX>>01'
+*
+memvname string$  {Memory View Button}
+*
+memvver  string$  {1.01}
+*
+         dc.b     0,0
+         dc.w     sbasic-2-*
+         dc.w     0,0
+         dc.w     dsbasic-*
+         dc.w     asbasic-*
+*
+         dc.b     10,0
+         dc.w     syscol-*
+         dc.w     0
+         dc.w     colour-*
+         dc.w     dsys-*
+         dc.w     acol-*
+*
+         dc.b     10,0
+         dc.w     freecol-*
+         dc.w     0
+         dc.w     colour-*
+         dc.w     dfree-*
+         dc.w     acol-*
+*
+         dc.b     10,0
+         dc.w     mycol-*
+         dc.w     0
+         dc.w     colour-*
+         dc.w     dmy-*
+         dc.w     acol-*
+*
+         dc.b     10,0
+         dc.w     rescol-*
+         dc.w     0
+         dc.w     colour-*
+         dc.w     dres-*
+         dc.w     acol-*
+*
+         dc.b     10,0
+         dc.w     xwidth-*
+         dc.w     0,0
+         dc.w     dwidth-*
+         dc.w     awidth-*
+*
+         dc.b     10,0
+         dc.w     pause-*
+         dc.w     0,0
+         dc.w     dpause-*
+         dc.w     apause-*
+*
+         dc.b     4,0
+         dc.w     infob-*
+         dc.w     0,0
+         dc.w     dinfob-*
+         dc.w     ainfob-*
+*
+         dc.w     -1
+*
+dsbasic  string$  {Default name of Job 0}
+dsys     string$  {Colour for system space}
+dfree    string$  {Colour for free space}
+dmy      string$  {Colour for Job space}
+dres     string$  {Colour for RESPR space}
+dwidth   string$  {Width for Job name}
+dpause   string$  {Pause between switches in frames}
+dinfob   string$  {Map Jobs with priority 1 or 126}
+*
+         dc.w     62
+sbasic   string$  {SuperBASIC}
+         ds.b     64-(*-sbasic)
+*
+acol     dc.w     0,255
+asbasic  dc.w     1
+awidth   dc.w     10,40
+apause   dc.w     1,300
+ainfob   dc.b     0,'N'
+         string$  {No}
+         ds.w     0
+         dc.b     1,'Y'
+         string$  {Yes}
+         dc.w     -1
+*
+xwidth   dc.w     18
+*
+pause    dc.w     75
+*
+infob    dc.b     0
+*
+syscol   dc.w     2
+syscolr  dc.w     $00ff,$00ff
+freecol  dc.w     4
+freecolr dc.w     $ff00,$ff00
+mycol    dc.w     7
+mycolr   dc.w     $ffff,$ffff
+rescol   dc.w     2
+rescolr  dc.w     $00ff,$00ff
+*
+* Colour construction routine in QDOS/etc isn't vectored (stupid)
+* ...so we have to do it ourselves.
+*
+colour   tst.b    d1
+         beq.s    coldone
+         move.w   (a0),d3
+         and.b    #$f6,d3
+         bsr.s    getcol
+         move.w   d2,2(a0)
+         move.w   d2,4(a0)
+         lsr.b    #3,d3
+         bsr.s    getcol
+         lsr.b    #3,d3
+         btst     #0,d3
+         beq.s    evpatrn
+         eor.w    d2,4(a0)
+*
+evpatrn  cmp.b    #1,d3
+         beq.s    coldone
+         and.w    #$5555,d2
+         eor.w    d2,2(a0)
+         tst.b    d3
+         beq.s    coldone
+         eor.w    d2,4(a0)
+*
+coldone  moveq    #wsi.avbl,d1
+         moveq    #0,d0
+         rts
+*
+getcol   move.b   d3,d2
+         and.w    #7,d2
+         move.w   colours(pc,d2.w),d2
+         rts
+*
+colours  dc.w     $0000
+         dc.w     $00ff
+         dc.w     $ff00
+         dc.w     $ffff
+*
+mask     dcb.b    64*8,$ff
+*
+         end

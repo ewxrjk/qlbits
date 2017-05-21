@@ -1,0 +1,222 @@
+********************************************************************************
+* HOT_DATE function                                  (c) 1991 Richard Kettlewell
+*
+* Revision history:
+*
+*        0.1      Stores all of date in stuffer buffer (i.e. DATE$)
+*        0.2      Allows special date formats
+*        0.21     Extended hotkey item name
+*        0.21a    Code reorganised
+*        0.22     Full day and month names added (configurable)
+*        0.22a    Does not require quotes around key
+*        0.22b    Returns float instead of integer
+*        0.22c    A couple of bugs removed - $\ now works!
+*        0.3      Stuff keyboard queue instead of buffer
+*        0.31     $H added, code reorganised to suite; general tidying
+*        1.00     Incorporated into hbutils
+*
+* Known bugs:
+*
+*        Does not remove existing hotkey --- i.e. can return 'in use'.
+*        This is not really an error; use HOT_REMV to circumvent.
+*
+* Function defined:
+*
+*                 HOT_DATE(key,format)
+*
+*        The value returned is as from other HOT_??? functions; the key is
+*        a one character string (else ERR.BP) as usual, while format is a 
+*        format string containing, among normal characters:-
+*
+*        $d                3 characters day from DATE$
+*        $m                3 characters month from DAY$
+*        $D                local full day name
+*        $M                local full month name
+*        $\                1 newline character
+*        $H                AM/PM, length depends on configured names
+*        %y                4 characters year
+*        %d                2 characters day of month
+*        %h                2 characters hour (24hr)
+*        %m                2 characters minute
+*        %s                2 characters second
+*
+*        If an unknown character follows the $ or % then it is inserted without 
+*        the $ or %; the characters % and $ may themselves be inserted in this 
+*        way.
+*
+*        When the hotkey is pressed, the current date according to the format
+*        specified for that key is stuffed into the keyboard by indirectly
+*        calling the hotkey again.
+*
+*        The contents of the SPECIALS_0 from the Quanta library was
+*        absolutely essential (the HK_ include files come from there)
+*
+*        For more recent documentation, see Jochen Merz's QDOS Reference
+*        Manual. 
+*
+         include  'hk_data'
+         include  'hk_vector'
+         include  'string_mac'
+*
+         xref     bp_fname,strld,strdrop,convert
+         xref     th_ushot,th_frhot,ftime
+*
+         xdef     hot_date
+*
+err.ipar equ      -15                        ; Bad parameter
+bv_chbas equ      $30                        ; Channels
+bv_rip   equ      $58                        ; RI stack pointer
+sb.gtstr equ      $116                       ; Get string parameters
+sms.info equ      0
+sms.rrtc equ      $13                        ; Read clock
+sms.achp equ      $18                        ; Get RAM
+sms.rchp equ      $19                        ; Free RAM
+*
+         section  text
+*
+         dc.b     '<<QCFX>>01'
+         string$  {HOT_DATE}
+         string$  {1.00}
+*
+         dc.b     0,'D'                      ; Default string
+         dc.w     it_dstr-*
+         dc.w     0
+         dc.w     0
+         dc.w     ds_dstr-*
+         dc.w     at_dstr-*
+*
+         dc.w     -1         
+*
+ds_dstr  string$  {Default date format string} {}
+*
+at_dstr  dc.w     1
+*
+it_dstr  dc.w     62
+defstr   string$  {%h:%m:%s $m %d %y}        ; Default string
+         ds.b     64-(*-defstr)
+*
+hot_date jsr      bp_fname(pc)               ; Get key
+         bne      ret
+         moveq    #err.ipar,d0
+         cmp.w    #1,(a6,a1.l)
+         bne      ret
+         moveq    #0,d6                      ; Remove extraneous garbage
+         move.b   2(a6,a1.l),d6              ; Get key
+         addq.l   #4,a1                      ; Skip over it
+         move.l   a1,bv_rip(a6)              ; Set stack pointer
+         cmp.l    a3,a5                      ; Any more parameters?
+         beq.s    no_str                     ; If not, use default
+         move.l   d6,-(sp)
+         move.w   sb.gtstr,a2                ; Get string parameters
+         jsr      (a2)
+         move.l   (sp)+,d6
+         tst.l    d0
+         bne      ret
+         moveq    #err.ipar,d0               ; Must be exactly one
+         cmp.w    #1,d3
+         bne      ret
+         bra.s    got_pat
+*
+no_str   lea      defstr(pc),a0              ; Find default string
+         jsr      strld(pc)                  ; Push it onto the stack
+*
+got_pat  moveq    #err.ipar,d0
+         move.w   0(a6,a1.l),d5              ; Get length of format string
+         beq      ret                        ; May not be null string
+         move.l   a1,bv_rip(a6)              ; Set stack for future reference
+         moveq    #sms.achp,d0               ; Allocate item block
+         moveq    #hki_name+2,d1             ; Minimum length
+         add.w    d5,d1
+         addq.w   #8,d1                      ; 'DATE '+length+rounding
+         bclr     #0,d1
+         moveq    #-1,d2                     ; This job
+         trap     #1
+         move.l   d0,d7
+         bne.s    return
+         move.w   #hki.id,hki_id(a0)         ; Mark as a hotkey block
+         move.w   #hki.nop,hki_type(a0)      ; Type: execute code
+         lea      hdate(pc),a1               ; Code to execute
+         move.l   a1,hki_ptr(a0)
+         lea      hki_name(a0),a3            ; Where to put format string
+         addq.w   #5,d5                      ; Length of name
+         move.w   d5,(a3)+                   ; Name
+         subq.w   #6,d5                      ; Bytes to copy-1 for DBRA
+         move.l   #'DATE',(a3)+              ; Type name
+         move.b   #' ',(a3)+
+         move.l   bv_rip(a6),a2              ; Find base of string text
+*
+copy20   move.b   2(a6,a2.l),(a3)+           ; Copy format string
+         addq.l   #1,a2
+         dbra     d5,copy20
+         move.l   a0,a4                      ; Store item block
+         jsr      th_ushot(pc)
+         move.l   d0,d7                      ; Store and test error
+         bne.s    rmvret
+         move.l   a1,a3                      ; Linkage block or Thing?
+         moveq    #hks.set,d0                ; Set a new hotkey
+         move.l   d6,d1
+         move.l   a4,a1                      ; Item block
+         move.l   hk.set(a3),a2              ; Set vector
+         jsr      (a2)                       ; Do set
+         move.l   d0,d7                      ; Store error code
+         jsr      th_frhot(pc)
+         tst.l    d7                         ; Was there an error from HK_SET?
+         beq.s    return
+*
+rmvret   move.l   a4,a0                      ; Get item block
+         moveq    #sms.rchp,d0               ; Free it
+         trap     #1
+*
+return   jsr      strdrop(pc)
+         subq.l   #4,a1                      ; The space *does* exist 
+         move.l   d7,0(a6,a1.l)              ; Return value
+         move.l   a1,bv_rip(a6)
+         moveq    #2,d0                      ; To fp
+         moveq    #5,d1                      ; From long 
+         jsr      convert(pc)
+         moveq    #2,d4                      ; Set return type to FP
+         moveq    #0,d0                      ; No error
+*
+ret      rts
+*
+* Execution code for date hotkey
+*
+* On entry:
+*
+*        A1       Hotkey item block to execute
+*        A3       Hotkey linkage block
+*
+*        +other regs?
+*
+hdate    movem.l  d1-d4/a0-a4,-(sp)
+         move.l   a1,a4                      ; A1=hotkey item
+         add.w    #hki_name,a4               ; Go to base of format string
+         move.w   (a4)+,d4                   ; Length
+         moveq    #0,d0
+         subq.w   #5,d4                      ; Remove 'DATE '
+         ble.s    nostuff                    ; May be null string or bad string
+         addq.l   #5,a4                      ; Skip 'DATE '
+         lea      hkd_buf1(a3),a1            ; Large buffer
+         move.l   #hki.id<<16+hki.stuf,(a1)+ ; Set identifier and type
+         lea      hkd_buf1+hki_name+2(a3),a2 ; Address of string text
+         move.l   a2,(a1)+                   ; This is done for real hotkeys?
+         move.l   a1,-(a7)                   ; Base of string is here
+         addq.l   #2,a1                      ; Length TBA
+         moveq    #sms.rrtc,d0               ; Find time/date
+         trap     #1
+         moveq    #0,d2                      ; Length being counted
+         jsr      ftime(pc)
+         move.l   (a7)+,a0
+         move.w   d2,(a0)                    ; Set length/anything to stuff?
+         beq.s    nostuff                    ; If not, don't bother
+         clr.b    (a1)                       ; Appears to be necessary
+         lea      hkd_buf1(a3),a1            ; Data to stuff
+         move.l   hk.do(a3),a2               ; Do hotkey
+         jsr      (a2)
+*
+nostuff  movem.l  (sp)+,d1-d4/a0-a4
+         tst.l    d0
+         rts
+*
+         end
+

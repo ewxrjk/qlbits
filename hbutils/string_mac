@@ -1,0 +1,18 @@
+         nolist
+*	
+string$  macro    
+         local    c
+[.lab]   dc.w     l[.l]-*-2
+c        setnum   1
+         goto     entry
+loop     maclab
+         dc.b     10
+entry    maclab
+         dc.b     '[.parm([c])]'
+c        setnum   [c]+1
+         ifnum    [c] <= [.nparms] goto loop
+l[.l]
+         ds.w     0
+         endm
+*
+         list

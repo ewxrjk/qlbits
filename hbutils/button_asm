@@ -1,0 +1,174 @@
+********************************************************************************
+* Button Utilities                                   (c) 1993 Richard Kettlewell
+*
+* 17/08/1994 rjk Updated version number to 1.11
+* 09/08/1994 rjk Debugged new stuff
+* 29/07/1994 rjk Version 1.10
+*
+         include  'string_mac'
+*
+         xdef     getbutn,butnwait,zap,console,icolr
+*
+         xref     th_usbfr
+*
+sms.frjb equ      $05
+sms.spjb equ      $0b
+sms.dmod equ      $10
+ioa.open equ      $01
+iow.defb equ      $0c
+iow.clra equ      $20
+iow.spap equ      $27
+iow.sstr equ      $28
+iow.sink equ      $29
+iop.rptr equ      $71
+iop.outl equ      $7a
+*
+forever  equ      -1
+*
+         section  text
+*
+zap      move.l   d0,d3
+         moveq    #sms.frjb,d0
+         moveq    #-1,d1
+         trap     #1
+*
+* GETBUTN
+* Get a button of size D2 -> A0; terminate Job on error
+* D1 = button position or -1 to use button frame
+*
+getbutn  movem.l  d0-d5/a1/a3,-(a7)
+         move.l   d1,d5                      ; preserve position
+         add.l    #$00030001,d2
+         and.l    #$fffcfffe,d2              ; adjust button size
+         move.l   d2,d4
+         moveq    #sms.spjb,d0
+         moveq    #-1,d1
+         moveq    #1,d2
+         trap     #1                         ; make this Job slow
+         moveq    #sms.dmod,d0
+         moveq    #-1,d1
+         moveq    #-1,d2
+         trap     #1                         ; get display mode
+         tst.b    d1                         ; maybe it's OK already
+         beq.s    okmode
+         moveq    #sms.dmod,d0
+         moveq    #0,d1
+         moveq    #-1,d2
+         trap     #1                         ; set display mode
+*
+okmode   moveq    #ioa.open,d0
+         moveq    #-1,d1                     ; id good for next call too
+         moveq    #0,d3
+         lea      console(pc),a0
+         trap     #2                         ; open a window
+         tst.l    d0
+         bne      zap                        ; aargh!
+         move.l   d5,d2                      ; was there a position given?
+         bpl.s    gotposn
+         move.l   d4,d2                      ; button size
+         move.l   a0,a3                      ; preserve channel id
+         moveq    #0,d3                      ; allocate, not realloc
+         jsr      th_usbfr(pc)               ; call th_use to find position
+         tst.l    d0
+         bne      zap                        ; aargh!
+         move.l   a3,a0                      ; restore channel id
+*
+gotposn  move.l   d2,-(a7)                   ; origin
+         move.l   d4,-(a7)                   ; preserved size
+         move.l   a7,a1                      ; parameter block on stack
+         moveq    #iop.outl,d0
+         moveq    #0,d1                      ; no shadow
+         moveq    #0,d2                      ; discard window contents
+         moveq    #forever,d3
+         trap     #3                         ; set window outline
+         tst.l    d0
+         bne      zap                        ; aargh!
+         addq.l   #8,a7                      ; discard parameter block
+         moveq    #iow.defb,d0
+         move.w   bcolr(pc),d1               ; configured border colour
+         moveq    #1,d2                      ; 1 pixel
+         trap     #3                         ; set border
+         moveq    #iow.spap,d0
+         move.w   pcolr(pc),d1               ; configured paper colour
+         trap     #3                         ; set paper colour
+         moveq    #iow.sstr,d0
+         move.w   pcolr(pc),d1               ; configured paper colour
+         trap     #3                         ; set strip colour
+         moveq    #iow.sink,d0               ; configured ink colour
+         move.w   icolr(pc),d1
+         trap     #3                         ; set ink colour
+         moveq    #iow.clra,d0
+         trap     #3                         ; clear window
+         movem.l  (a7)+,d0-d5/a1/a3
+         rts
+*
+* BUTNWAIT
+* Wait for something to happen in a button 
+*
+butnwait movem.l  d0-d3/a1,-(a7)
+         sub.w    #24,a7                     ; buffer for pointer record
+         moveq    #iop.rptr,d0
+         moveq    #0,d1                      ; last pointer position = anywhere
+         tst.w    d3                         ; is there a timeout?
+         bpl.s    xpause                     ; if so, use it
+         move.w   pause(pc),d3               ; use default configured timeout
+         moveq    #0,d2                      ; no termination vector
+         bra.s    gotpause
+*
+xpause   moveq    #3,d2                      ; termination vector
+*
+gotpause move.l   a7,a1                      ; buffer for pointer record
+         trap     #3                         ; read pointer
+         add.w    #24,a7                     ; discard pointer record
+         movem.l  (a7)+,d0-d3/a1
+         rts
+*
+* Configuration
+*
+         dc.w     '<<QCFX>>'
+         dc.w     '01'
+         string$  {HBUTILS button support}
+         string$  {1.11}
+*
+         dc.b     10,0
+         dc.w     bcolr-*
+         dc.w     0,0
+         dc.w     dbcolr-*
+         dc.w     acolr-*
+*
+         dc.b     10,0
+         dc.w     pcolr-*
+         dc.w     0,0
+         dc.w     dpcolr-*
+         dc.w     acolr-*
+*
+         dc.b     10,0
+         dc.w     icolr-*
+         dc.w     0,0
+         dc.w     dicolr-*
+         dc.w     acolr-*
+*
+         dc.b     10,0
+         dc.w     pause-*
+         dc.w     0,0
+         dc.w     dpause-*
+         dc.w     apause-*
+*
+         dc.w     -1
+*
+bcolr    dc.w     2
+pcolr    dc.w     0
+icolr    dc.w     7
+pause    dc.w     50
+*
+dbcolr   string$  {Button border colour}
+dpcolr   string$  {Button paper colour}
+dicolr   string$  {Button ink colour}
+dpause   string$  {Pause between updates in frames}
+*
+acolr    dc.w     0,255
+apause   dc.w     1,500
+*
+console  string$  {con_}
+*
+         end

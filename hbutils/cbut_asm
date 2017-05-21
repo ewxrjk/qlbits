@@ -1,0 +1,124 @@
+********************************************************************************
+* Caps Lock button                                   (c) 1993 Richard Kettlewell
+*
+* 20/7/1994 rjk Support different length on/off strings
+*               Minimal support for 1.10 button code
+*
+         include  'string_mac'
+*
+         xdef     capsthg,capsname,capsver
+*
+         xref     getbutn
+         xref     butnwait
+         xref     getpos
+*
+sms.info equ      $00
+iob.smul equ      $07
+iow.spix equ      $17
+iow.clrr equ      $24
+forever  equ      -1
+sys_caps equ      $88
+*
+         section  text
+*
+* Start of Thing:
+*
+capsthg  dc.l     'THG%'
+         dc.l     1
+         dc.l     capshead-capsthg
+         dc.l     capshend-capshead
+         dc.l     192
+         dc.l     capscode-capsthg
+*
+* Start of Job:
+*
+capshead ds.b     6
+         dc.w     $4afb
+         string$  {Capslock}
+*
+capshend ds.w     0
+*
+capscode add.l    a4,a6             ; find some workspace
+         moveq    #sms.info,d0
+         trap     #1                ; find system variables
+         move.l   a0,a5
+         move.w   sys_caps(a5),d0   ; find current value
+         not.w    d0
+         move.w   d0,(a6)           ; store it
+         move.w   capsoff(pc),d2    ; length of 'off' string
+         cmp.w    capson(pc),d2
+         bhs.s    gotlen            ; 'on' string longer?
+         move.w   capson(pc),d2     ; pick longest
+*
+gotlen   mulu     #6,d2             ; width of 1 character
+         addq.w   #8,d2             ; width of border and spacing
+         swap     d2
+         move.w   #12+2,d2          ; total height of window
+         move.w   (a7),d0
+         lsl.w    #2,d0
+         lea      2(a7,d0.w),a0     ; start of command line
+         jsr      getpos(pc)        ; find a position
+         jsr      getbutn(pc)       ; get a button
+         moveq    #forever,d3
+*
+loop     move.w   sys_caps(a5),d4   ; get capslock status
+         cmp.w    (a6),d4           ; has it changed?
+         beq.s    wait              ; if not, do nothing
+         moveq    #iow.spix,d0
+         moveq    #2,d1
+         moveq    #1,d2
+         trap     #3                ; position cursor
+         lea      capsoff(pc),a1    ; assume 'off'
+         move.w   d4,(a6)           ; record status
+         beq.s    gotstr            ; if it was 'off', we're OK
+         lea      capson(pc),a1     ; it's 'on'
+*
+gotstr   moveq    #iob.smul,d0
+         move.w   (a1)+,d2
+         trap     #3                ; print the message
+         moveq    #iow.clrr,d0
+         trap     #3                ; clear out rest of window
+*
+wait ;   moveq    #-1,d3            ; wait for something to happen
+         jsr      butnwait(pc)
+         bra      loop              ; do it all again
+*
+* Configuration table
+*
+         dc.w     '<<QCFX>>'
+         dc.w     '01'
+*
+capsname string$  {Caps Button}
+*
+capsver  string$  {1.10}
+*
+         dc.b     0,0
+         dc.w     capsoff-2-*
+         dc.w     0,0
+         dc.w     d_off-*
+         dc.w     attr-*
+*
+         dc.b     0,0
+         dc.w     capson-2-*
+         dc.w     0,0
+         dc.w     d_on-*
+         dc.w     attr-*
+*
+         dc.w     -1
+*
+attr     dc.w     1
+*
+d_off    string$  {Caps lock off message} \
+                  {}
+d_on     string$  {Caps lock on message} \
+                  {}
+         dc.w     30
+capsoff  dc.w     8
+         dc.b     'Caps off'
+         ds.b     24
+         dc.w     30
+capson   dc.w     8
+         dc.b     'Caps on '
+         ds.b     24
+*
+         end

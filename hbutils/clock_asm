@@ -1,0 +1,104 @@
+********************************************************************************
+* Clock button                                       (c) 1993 Richard Kettlewell
+*
+* 17/08/1994 rjk Updated version number
+* 09/08/1994 rjk Debugged
+* 20/07/1994 rjk Minimal support for 1.10 button code
+*
+         include  'string_mac'
+*
+         xdef     clckthg,clckname,clckver
+*
+         xref     getbutn,butnwait,ftime,getpos
+*
+sms.rrtc equ      $13
+iob.smul equ      $07
+iow.spix equ      $17
+iow.clrr equ      $24
+forever  equ      -1
+*
+         section  text
+*
+* Start of Thing:
+*
+clckthg  dc.l     'THG%'
+         dc.l     1
+         dc.l     clckhead-clckthg
+         dc.l     clckhend-clckhead
+         dc.l     192
+         dc.l     clckcode-clckthg
+*
+* Start of Job:
+*
+clckhead ds.b     6
+         dc.w     $4afb
+         string$  {Clock}
+*
+clckhend ds.w     0
+*
+clckcode lea      2(a6,a4.l),a6              ; some workspace
+         move.w   (a7)+,d0                   ; command line
+         lsl.w    #2,d0
+         add.w    d0,a7                      ; skip channels
+         move.l   a7,a0
+         jsr      getpos(pc)
+         move.l   a7,a4
+         move.l   d1,-(a7)
+         tst.w    (a4)                       ; is there a command line?
+         bne.s    gotstr
+         lea      defstr(pc),a4              ; use configured default
+*
+gotstr   move.w   (a4)+,d4                   ; find length of format
+         bsr.s    mkstr                      ; find length of result
+         mulu     #6,d2                      ; width of 1 character
+         addq.w   #8,d2                      ; border space
+         swap     d2
+         move.w   #14,d2                     ; height of window
+         move.l   (a7)+,d1
+         jsr      getbutn(pc)                ; get button
+         moveq    #forever,d3
+*
+loop     bsr.s    mkstr                      ; compile string
+         move.w   d2,d5
+         moveq    #iow.spix,d0
+         moveq    #2,d1
+         moveq    #1,d2
+         trap     #3                         ; position cursor
+         moveq    #iob.smul,d0
+         move.w   d5,d2
+         move.l   a6,a1
+         trap     #3                         ; print string
+         moveq    #iow.clrr,d0
+         trap     #3                         ; tidy window
+;        moveq    #-1,d3
+         jsr      butnwait(pc)               ; wait for something to happen
+         bra      loop
+*
+mkstr    moveq    #sms.rrtc,d0
+         trap     #1                         ; read time
+         move.l   a6,a1
+         moveq    #0,d2
+         jmp      ftime(pc)                  ; compose time
+*
+         dc.b     '<<QCFX>>01'
+clckname string$  {Clock Button}
+clckver  string$  {1.02}
+         ds.w     0
+*
+         dc.b     0,0
+         dc.w     defstr-2-*
+         dc.w     0,0
+         dc.w     ddefstr-*
+         dc.w     adefstr-*
+*
+         dc.w     -1
+*
+         dc.w     62
+defstr   string$  {%h:%m}
+         ds.b     64-(*-defstr)
+*
+adefstr  dc.w     1
+*
+ddefstr  string$  {Default date format string}
+*
+         end

@@ -1,0 +1,81 @@
+********************************************************************************
+* Button position support                            (c) 1994 Richard Kettlewell
+*
+         xdef     getpos,getnum,skipspc
+*
+err.ipar equ      -15
+*
+         section  text
+*
+getpos   movem.l  d0/d2-d5,-(a7)
+         move.w   (a0),d0           ; find end of string
+         move.w   d0,d2             ; length of string
+*
+gp_find  subq.w   #1,d0             ; go back
+         bmi.s    gp_none           ; fallen off start of string
+         cmp.b    #'@',2(a0,d0.w)   ; found '@' yet?
+         beq.s    gp_found
+         bra.s    gp_find
+*
+gp_none  moveq    #-1,d1            ; there's no position spec
+         moveq    #0,d0             ; no error
+*
+done     movem.l  (a7)+,d0/d2-d5
+         rts
+*
+gp_found move.w   d0,d5             ; preserve length to cut to
+         addq.w   #1,d0             ; step past '@'
+         bsr.s    skipspc           ; skip any spaces
+         bsr.s    getnum            ; get a number
+         bne      done              ; quit on error
+         swap     d1
+         bsr.s    skipspc           ; skip any spaces
+         bsr.s    getnum            ; get another number
+         bne      done              ; quit on error
+         bsr.s    skipspc           ; skip any spaces
+         cmp.w    d0,d2             ; end of string
+         bne.s    error             ; if not, error
+         move.w   d5,(a0)           ; truncate string
+         moveq    #0,d0
+         bra      done
+*
+error    moveq    #-1,d1            ; no position
+         moveq    #err.ipar,d0      ; report error
+         bra      done
+*
+skipspc  cmp.w    d0,d2             ; end of string?
+         beq.s    ret               ; if so, exit
+         cmp.b    #' ',2(a0,d0.w)   ; space?
+         bne.s    ret               ; if not, exit
+         addq.w   #1,d0             ; forward a bit
+         bra.s    skipspc           ; same again
+*
+getnum   cmp.w    d0,d2             ; end of string => no number
+         beq.s    failed
+         cmp.b    #'0',2(a0,d0.w)   ; is it a digit?
+         blo.s    failed
+         cmp.b    #'9',2(a0,d0.w)
+         bhi.s    failed
+         moveq    #0,d3             ; read nothing yet
+         moveq    #0,d4             ; clear bits 8--15
+*
+gn_loop  move.b   2(a0,d0.w),d4     ; get digit
+         sub.b    #'0',d4           ; translate it
+         cmp.b    #9,d4             ; check range
+         bhi.s    gn_done
+         mulu     #10,d3            ; scale number so far
+         add.w    d4,d3             ; add in
+         addq.w   #1,d0             ; step forward
+         cmp.w    d0,d2             ; reached end?
+         bne      gn_loop           ; if not, keep scanning
+*
+gn_done  move.w   d3,d1             ; store value
+         moveq    #0,d3             ; clear Z flag
+*
+ret      rts
+*
+failed   moveq    #-1,d1            ; no value
+         moveq    #err.ipar,d0      ; set Z and D0
+         rts
+*
+         end
